@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,27 +13,32 @@
 package redis
 
 import (
-	miniredis "github.com/alicebob/miniredis/v2"
-	"github.com/google/uuid"
-	"github.com/stretchr/testify/assert"
-	"mosn.io/layotto/components/lock"
-	"mosn.io/pkg/log"
+	"context"
 	"strings"
 	"sync"
 	"testing"
+
+	miniredis "github.com/alicebob/miniredis/v2"
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+
+	"mosn.io/layotto/components/lock"
 )
 
-const cResourceId = "resource_red_lock"
+const (
+	redisHosts  = "127.0.0.1"
+	cResourceId = "resource_red_lock"
+)
 
 func TestClusterRedisLock_InitError(t *testing.T) {
 	t.Run("error when connection fail", func(t *testing.T) {
 		// construct component
-		comp := NewClusterRedisLock(log.DefaultLogger)
+		comp := NewClusterRedisLock()
 
 		cfg := lock.Metadata{
 			Properties: make(map[string]string),
 		}
-		cfg.Properties["redisHosts"] = "127.0.0.1"
+		cfg.Properties["redisHosts"] = redisHosts
 		cfg.Properties["redisPassword"] = ""
 
 		// init
@@ -44,7 +48,7 @@ func TestClusterRedisLock_InitError(t *testing.T) {
 
 	t.Run("error when no host", func(t *testing.T) {
 		// construct component
-		comp := NewClusterRedisLock(log.DefaultLogger)
+		comp := NewClusterRedisLock()
 
 		cfg := lock.Metadata{
 			Properties: make(map[string]string),
@@ -59,12 +63,12 @@ func TestClusterRedisLock_InitError(t *testing.T) {
 
 	t.Run("error when wrong MaxRetries", func(t *testing.T) {
 		// construct component
-		comp := NewClusterRedisLock(log.DefaultLogger)
+		comp := NewClusterRedisLock()
 
 		cfg := lock.Metadata{
 			Properties: make(map[string]string),
 		}
-		cfg.Properties["redisHosts"] = "127.0.0.1"
+		cfg.Properties["redisHosts"] = redisHosts
 		cfg.Properties["redisPassword"] = ""
 		cfg.Properties["maxRetries"] = "1 "
 
@@ -77,17 +81,15 @@ func TestClusterRedisLock_InitError(t *testing.T) {
 
 func TestClusterRedisLock_TryLock(t *testing.T) {
 	// start 5 miniredis instances
-	redisInstances := make([]*miniredis.Miniredis, 0, 5)
 	redisAddrs := make([]string, 0, 5)
 	var err error
 	for i := 0; i < 5; i++ {
 		redis, err := miniredis.Run()
 		assert.NoError(t, err)
-		redisInstances = append(redisInstances, redis)
 		redisAddrs = append(redisAddrs, redis.Addr())
 	}
 	// construct component
-	comp := NewClusterRedisLock(log.DefaultLogger)
+	comp := NewClusterRedisLock()
 	cfg := lock.Metadata{
 		Properties: make(map[string]string),
 	}
@@ -98,7 +100,7 @@ func TestClusterRedisLock_TryLock(t *testing.T) {
 	assert.NoError(t, err)
 	// 1. client1 trylock
 	ownerId1 := uuid.New().String()
-	resp, err := comp.TryLock(&lock.TryLockRequest{
+	resp, err := comp.TryLock(context.TODO(), &lock.TryLockRequest{
 		ResourceId: cResourceId,
 		LockOwner:  ownerId1,
 		Expire:     10,
@@ -110,7 +112,7 @@ func TestClusterRedisLock_TryLock(t *testing.T) {
 	//	2. Client2 tryLock fail
 	go func() {
 		owner2 := uuid.New().String()
-		resp2, err2 := comp.TryLock(&lock.TryLockRequest{
+		resp2, err2 := comp.TryLock(context.TODO(), &lock.TryLockRequest{
 			ResourceId: cResourceId,
 			LockOwner:  owner2,
 			Expire:     10,
@@ -121,7 +123,7 @@ func TestClusterRedisLock_TryLock(t *testing.T) {
 	}()
 	wg.Wait()
 	// 3. client 1 unlock
-	unlockResp, err := comp.Unlock(&lock.UnlockRequest{
+	unlockResp, err := comp.Unlock(context.TODO(), &lock.UnlockRequest{
 		ResourceId: cResourceId,
 		LockOwner:  ownerId1,
 	})
@@ -131,7 +133,7 @@ func TestClusterRedisLock_TryLock(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		owner2 := uuid.New().String()
-		resp2, err2 := comp.TryLock(&lock.TryLockRequest{
+		resp2, err2 := comp.TryLock(context.TODO(), &lock.TryLockRequest{
 			ResourceId: cResourceId,
 			LockOwner:  owner2,
 			Expire:     10,
@@ -139,7 +141,7 @@ func TestClusterRedisLock_TryLock(t *testing.T) {
 		assert.NoError(t, err2)
 		assert.True(t, resp2.Success, "client2 failed to get lock?!")
 		// 5. client2 unlock
-		unlockResp, err := comp.Unlock(&lock.UnlockRequest{
+		unlockResp, err := comp.Unlock(context.TODO(), &lock.UnlockRequest{
 			ResourceId: cResourceId,
 			LockOwner:  owner2,
 		})
@@ -148,4 +150,8 @@ func TestClusterRedisLock_TryLock(t *testing.T) {
 		wg.Done()
 	}()
 	wg.Wait()
+	// not implement LockKeepAlive
+	keepAliveResp, err := comp.LockKeepAlive(context.TODO(), &lock.LockKeepAliveRequest{})
+	assert.Nil(t, keepAliveResp)
+	assert.Nil(t, err)
 }

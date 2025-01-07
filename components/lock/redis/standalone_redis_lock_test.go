@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +13,15 @@
 package redis
 
 import (
+	"context"
+	"sync"
+	"testing"
+
 	miniredis "github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+
 	"mosn.io/layotto/components/lock"
-	"mosn.io/pkg/log"
-	"sync"
-	"testing"
 )
 
 const resourceId = "resource_xxx"
@@ -28,7 +29,7 @@ const resourceId = "resource_xxx"
 func TestStandaloneRedisLock_InitError(t *testing.T) {
 	t.Run("error when connection fail", func(t *testing.T) {
 		// construct component
-		comp := NewStandaloneRedisLock(log.DefaultLogger)
+		comp := NewStandaloneRedisLock()
 		defer comp.Close()
 
 		cfg := lock.Metadata{
@@ -44,7 +45,7 @@ func TestStandaloneRedisLock_InitError(t *testing.T) {
 
 	t.Run("error when no host", func(t *testing.T) {
 		// construct component
-		comp := NewStandaloneRedisLock(log.DefaultLogger)
+		comp := NewStandaloneRedisLock()
 		defer comp.Close()
 
 		cfg := lock.Metadata{
@@ -60,7 +61,7 @@ func TestStandaloneRedisLock_InitError(t *testing.T) {
 
 	t.Run("error when wrong MaxRetries", func(t *testing.T) {
 		// construct component
-		comp := NewStandaloneRedisLock(log.DefaultLogger)
+		comp := NewStandaloneRedisLock()
 		defer comp.Close()
 
 		cfg := lock.Metadata{
@@ -84,7 +85,7 @@ func TestStandaloneRedisLock_TryLock(t *testing.T) {
 	assert.NoError(t, err)
 	defer s.Close()
 	// construct component
-	comp := NewStandaloneRedisLock(log.DefaultLogger)
+	comp := NewStandaloneRedisLock()
 	defer comp.Close()
 
 	cfg := lock.Metadata{
@@ -97,7 +98,7 @@ func TestStandaloneRedisLock_TryLock(t *testing.T) {
 	assert.NoError(t, err)
 	// 1. client1 trylock
 	ownerId1 := uuid.New().String()
-	resp, err := comp.TryLock(&lock.TryLockRequest{
+	resp, err := comp.TryLock(context.TODO(), &lock.TryLockRequest{
 		ResourceId: resourceId,
 		LockOwner:  ownerId1,
 		Expire:     10,
@@ -109,7 +110,7 @@ func TestStandaloneRedisLock_TryLock(t *testing.T) {
 	//	2. Client2 tryLock fail
 	go func() {
 		owner2 := uuid.New().String()
-		resp2, err2 := comp.TryLock(&lock.TryLockRequest{
+		resp2, err2 := comp.TryLock(context.TODO(), &lock.TryLockRequest{
 			ResourceId: resourceId,
 			LockOwner:  owner2,
 			Expire:     10,
@@ -120,7 +121,7 @@ func TestStandaloneRedisLock_TryLock(t *testing.T) {
 	}()
 	wg.Wait()
 	// 3. client 1 unlock
-	unlockResp, err := comp.Unlock(&lock.UnlockRequest{
+	unlockResp, err := comp.Unlock(context.TODO(), &lock.UnlockRequest{
 		ResourceId: resourceId,
 		LockOwner:  ownerId1,
 	})
@@ -130,7 +131,7 @@ func TestStandaloneRedisLock_TryLock(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		owner2 := uuid.New().String()
-		resp2, err2 := comp.TryLock(&lock.TryLockRequest{
+		resp2, err2 := comp.TryLock(context.TODO(), &lock.TryLockRequest{
 			ResourceId: resourceId,
 			LockOwner:  owner2,
 			Expire:     10,
@@ -138,7 +139,7 @@ func TestStandaloneRedisLock_TryLock(t *testing.T) {
 		assert.NoError(t, err2)
 		assert.True(t, resp2.Success, "client2 failed to get lock?!")
 		// 5. client2 unlock
-		unlockResp, err := comp.Unlock(&lock.UnlockRequest{
+		unlockResp, err := comp.Unlock(context.TODO(), &lock.UnlockRequest{
 			ResourceId: resourceId,
 			LockOwner:  owner2,
 		})

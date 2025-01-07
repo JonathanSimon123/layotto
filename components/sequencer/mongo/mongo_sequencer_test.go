@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,20 +13,21 @@
 package mongo
 
 import (
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+
 	"mosn.io/layotto/components/pkg/mock"
 	"mosn.io/layotto/components/sequencer"
-	"mosn.io/pkg/log"
-	"testing"
 )
 
 const key = "resource_xxx"
 
 func TestMongoSequencer_Init(t *testing.T) {
 	var mongoUrl = "localhost:xxxxx"
-	comp := NewMongoSequencer(log.DefaultLogger)
+	comp := NewMongoSequencer()
 
 	cfg := sequencer.Configuration{
 		BiggerThan: nil,
@@ -43,7 +43,7 @@ func TestMongoSequencer_Init(t *testing.T) {
 func TestMongoSequencer_GetNextId(t *testing.T) {
 	var mongoUrl = "localhost:27017"
 
-	comp := NewMongoSequencer(log.DefaultLogger)
+	comp := NewMongoSequencer()
 
 	cfg := sequencer.Configuration{
 		BiggerThan: nil,
@@ -86,7 +86,7 @@ func TestMongoSequencer_GetNextId(t *testing.T) {
 func TestMongoSequencer_Close(t *testing.T) {
 	var mongoUrl = "localhost:xxxxx"
 
-	comp := NewMongoSequencer(log.DefaultLogger)
+	comp := NewMongoSequencer()
 
 	cfg := sequencer.Configuration{
 		BiggerThan: nil,
@@ -119,7 +119,7 @@ func TestMongoSequencer_Close(t *testing.T) {
 func TestMongoSequencer_GetSegment(t *testing.T) {
 	var mongoUrl = "localhost:xxxxx"
 
-	comp := NewMongoSequencer(log.DefaultLogger)
+	comp := NewMongoSequencer()
 
 	cfg := sequencer.Configuration{
 		BiggerThan: nil,

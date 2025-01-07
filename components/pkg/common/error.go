@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,8 +33,8 @@ type CommonError interface {
 }
 
 type commonError struct {
-	code int    `json:"code"`
-	msg  string `json:"msg"`
+	code int
+	msg  string
 }
 
 func (le *commonError) Code() int {

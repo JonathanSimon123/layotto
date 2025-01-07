@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,35 +14,64 @@ package redis
 
 import (
 	"context"
+	"sync"
+
 	"github.com/go-redis/redis/v8"
+
+	"mosn.io/layotto/kit/logger"
+
+	"mosn.io/layotto/components/pkg/actuators"
 	"mosn.io/layotto/components/pkg/utils"
 	"mosn.io/layotto/components/sequencer"
-	"mosn.io/pkg/log"
 )
+
+const (
+	componentName = "sequencer-redis-standalone"
+)
+
+var (
+	once               sync.Once
+	readinessIndicator *actuators.HealthIndicator
+	livenessIndicator  *actuators.HealthIndicator
+)
+
+func init() {
+	readinessIndicator = actuators.NewHealthIndicator()
+	livenessIndicator = actuators.NewHealthIndicator()
+}
 
 type StandaloneRedisSequencer struct {
 	client     *redis.Client
 	metadata   utils.RedisMetadata
 	biggerThan map[string]int64
 
-	logger log.ErrorLogger
+	logger logger.Logger
 
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
 // NewStandaloneRedisSequencer returns a new redis sequencer
-func NewStandaloneRedisSequencer(logger log.ErrorLogger) *StandaloneRedisSequencer {
+func NewStandaloneRedisSequencer() *StandaloneRedisSequencer {
+	once.Do(func() {
+		indicators := &actuators.ComponentsIndicator{ReadinessIndicator: readinessIndicator, LivenessIndicator: livenessIndicator}
+		actuators.SetComponentsIndicator(componentName, indicators)
+	})
 	s := &StandaloneRedisSequencer{
-		logger: logger,
+		logger: logger.NewLayottoLogger("sequencer/redis"),
 	}
+	logger.RegisterComponentLoggerListener("sequencer/redis", s)
 	return s
 }
 
+func (s *StandaloneRedisSequencer) OnLogLevelChanged(level logger.LogLevel) {
+	s.logger.SetLogLevel(level)
+}
+
 /*
-   1. exists and >= biggerThan, no operation required, return 0
-   2. not exists or < biggthan, reset val, return 1
-   3. lua script occur error, such as tonumer(string), return error
+1. exists and >= biggerThan, no operation required, return 0
+2. not exists or < biggthan, reset val, return 1
+3. lua script occur error, such as tonumer(string), return error
 */
 const initScript = `
 if  redis.call('exists', KEYS[1])==1 and tonumber(redis.call('get', KEYS[1])) >= tonumber(ARGV[1]) then
@@ -57,6 +85,8 @@ end
 func (s *StandaloneRedisSequencer) Init(config sequencer.Configuration) error {
 	m, err := utils.ParseRedisMetadata(config.Properties)
 	if err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 		return err
 	}
 	//init
@@ -77,11 +107,15 @@ func (s *StandaloneRedisSequencer) Init(config sequencer.Configuration) error {
 		err = eval.Err()
 		//occur error,  such as value is string type
 		if err != nil {
+			readinessIndicator.ReportError(err.Error())
+			livenessIndicator.ReportError(err.Error())
 			return err
 		}
 		//As long as there is no error, the initialization is successful
 		//It may be a reset value or it may be satisfied before
 	}
+	readinessIndicator.SetStarted()
+	livenessIndicator.SetStarted()
 	return nil
 }
 

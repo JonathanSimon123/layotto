@@ -23,12 +23,13 @@ import (
 	"unsafe"
 
 	"mosn.io/api"
-	"mosn.io/layotto/components/pkg/common"
-	"mosn.io/layotto/components/rpc"
 	"mosn.io/mosn/pkg/protocol/xprotocol/bolt"
 	"mosn.io/mosn/pkg/protocol/xprotocol/boltv2"
 	"mosn.io/pkg/buffer"
 	"mosn.io/pkg/header"
+
+	"mosn.io/layotto/components/pkg/common"
+	"mosn.io/layotto/components/rpc"
 )
 
 // init mosn bolt or boltv2 protocol
@@ -62,20 +63,24 @@ func (b *boltCommon) Init(conf map[string]interface{}) error {
 // FromFrame is boltProtocol transform
 func (b *boltCommon) FromFrame(resp api.XRespFrame) (*rpc.RPCResponse, error) {
 	respCode := uint16(resp.GetStatusCode())
-	if respCode == bolt.ResponseStatusSuccess {
-		return b.fromFrame.FromFrame(resp)
+	rpcResp, err := b.fromFrame.FromFrame(resp)
+	rpcResp.Success = false
+	if err != nil {
+		return nil, common.Errorf(common.InternalCode, "bolt error code %d, transform RPCResponse fail with err: %+v", respCode, err)
 	}
-
 	switch respCode {
+	case bolt.ResponseStatusSuccess:
+		rpcResp.Success = true
 	case bolt.ResponseStatusServerDeserialException:
-		return nil, common.Errorf(common.InternalCode, "bolt error code %d, ServerDeserializeException", respCode)
+		rpcResp.Error = common.Errorf(common.InternalCode, "bolt error code %d, ServerDeserializeException", respCode)
 	case bolt.ResponseStatusServerSerialException:
-		return nil, common.Errorf(common.InternalCode, "bolt error code %d, ServerSerializeException", respCode)
+		rpcResp.Error = common.Errorf(common.InternalCode, "bolt error code %d, ServerSerializeException", respCode)
 	case bolt.ResponseStatusCodecException:
-		return nil, common.Errorf(common.InternalCode, "bolt error code %d, CodecException", respCode)
+		rpcResp.Error = common.Errorf(common.InternalCode, "bolt error code %d, CodecException", respCode)
 	default:
-		return nil, common.Errorf(common.UnavailebleCode, "bolt error code %d", respCode)
+		rpcResp.Error = common.Errorf(common.UnavailebleCode, "bolt error code %d", respCode)
 	}
+	return rpcResp, nil
 }
 
 // newBoltProtocol is create boltProtocol

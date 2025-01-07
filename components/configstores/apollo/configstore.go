@@ -24,15 +24,32 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"mosn.io/layotto/components/pkg/actuators"
+
 	"mosn.io/layotto/components/configstores"
-	"mosn.io/pkg/log"
+
+	log "mosn.io/layotto/kit/logger"
 )
 
 var (
 	openAPIClientSingleton = &http.Client{}
+	once                   sync.Once
+	readinessIndicator     *actuators.HealthIndicator
+	livenessIndicator      *actuators.HealthIndicator
 )
+
+const (
+	defaultGroup  = "application"
+	componentName = "apollo"
+)
+
+func init() {
+	readinessIndicator = actuators.NewHealthIndicator()
+	livenessIndicator = actuators.NewHealthIndicator()
+}
 
 type ConfigStore struct {
 	tagsNamespace  string
@@ -44,9 +61,10 @@ type ConfigStore struct {
 	listener       *changeListener
 	kvRepo         Repository
 	tagsRepo       Repository
-	kvConfig       *RepoConfig
-	tagsConfig     *RepoConfig
+	kvConfig       *repoConfig
+	tagsConfig     *repoConfig
 	openAPIClient  httpClient
+	log            log.Logger
 }
 type httpClient interface {
 	Do(req *http.Request) (*http.Response, error)
@@ -61,7 +79,7 @@ func (c *httpClientImpl) Do(req *http.Request) (*http.Response, error) {
 }
 
 func (c *ConfigStore) GetDefaultGroup() string {
-	return "application"
+	return defaultGroup
 }
 
 func (c *ConfigStore) GetDefaultLabel() string {
@@ -69,14 +87,29 @@ func (c *ConfigStore) GetDefaultLabel() string {
 }
 
 func NewStore() configstores.Store {
-	return &ConfigStore{
+	registerActuator()
+	cs := &ConfigStore{
 		tagsNamespace: defaultTagsNamespace,
 		delimiter:     defaultDelimiter,
 		env:           defaultEnv,
 		kvRepo:        newAgolloRepository(),
 		tagsRepo:      newAgolloRepository(),
 		openAPIClient: newHttpClient(),
+		log:           log.NewLayottoLogger("configstore/apollo"),
 	}
+	log.RegisterComponentLoggerListener("configstore/apollo", cs)
+	return cs
+}
+
+func (c *ConfigStore) OnLogLevelChanged(outputLevel log.LogLevel) {
+	c.log.SetLogLevel(outputLevel)
+}
+
+func registerActuator() {
+	once.Do(func() {
+		indicators := &actuators.ComponentsIndicator{ReadinessIndicator: readinessIndicator, LivenessIndicator: livenessIndicator}
+		actuators.SetComponentsIndicator(componentName, indicators)
+	})
 }
 
 func newHttpClient() httpClient {
@@ -85,15 +118,15 @@ func newHttpClient() httpClient {
 	}
 }
 
-//Init SetConfig the configuration store.
+// Init SetConfig the configuration store.
 func (c *ConfigStore) Init(config *configstores.StoreConfig) error {
 	err := c.doInit(config)
 	if err != nil {
-		GetReadinessIndicator().reportError(err.Error())
-		GetLivenessIndicator().reportError(err.Error())
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 	}
-	GetReadinessIndicator().setStarted()
-	GetLivenessIndicator().setStarted()
+	readinessIndicator.SetStarted()
+	livenessIndicator.SetStarted()
 	return err
 }
 
@@ -145,15 +178,17 @@ func (c *ConfigStore) doInit(config *configstores.StoreConfig) error {
 	}
 	// TODO make 'env' configurable
 	// 2. SetConfig client
-	kvRepoConfig := &RepoConfig{
+	kvRepoConfig := &repoConfig{
 		addr:           addr,
 		appId:          appId,
+		storeName:      config.StoreName,
 		env:            c.env,
 		cluster:        metadata["cluster"],
 		namespaceName:  metadata["namespace_name"],
 		isBackupConfig: isBackupConfig,
 		// secret,not required
 		secret: metadata["secret"],
+		logger: c.log,
 	}
 	c.kvConfig = kvRepoConfig
 	c.kvRepo.SetConfig(kvRepoConfig)
@@ -171,7 +206,7 @@ func (c *ConfigStore) doInit(config *configstores.StoreConfig) error {
 		return err
 	}
 	// 4. SetConfig listener
-	listener := newChangeListener(c)
+	listener := newChangeListener(c, c.log)
 	c.listener = listener
 	c.kvRepo.AddChangeListener(listener)
 	return nil
@@ -182,6 +217,13 @@ func (c *ConfigStore) GetAppId() string {
 		return ""
 	}
 	return c.kvConfig.appId
+}
+
+func (c *ConfigStore) GetStoreName() string {
+	if c.kvConfig == nil {
+		return ""
+	}
+	return c.kvConfig.storeName
 }
 
 // Get gets configuration from configuration store.
@@ -258,7 +300,7 @@ func (c *ConfigStore) Set(ctx context.Context, req *configstores.SetRequest) err
 		return err
 	}
 	// 4. commit kv namespace
-	for g, _ := range groupMap {
+	for g := range groupMap {
 		err := c.commit(c.env, req.AppId, c.kvConfig.cluster, g)
 		if err != nil {
 			return err
@@ -348,7 +390,7 @@ func (c *ConfigStore) StopSubscribe() {
 }
 
 func (c *ConfigStore) getKeys(group string, keys []string, label string) ([]*configstores.ConfigurationItem, error) {
-	log.DefaultLogger.Debugf("getKeys start.namespace : %v, keys : %v, label : %v", group, keys, label)
+	c.log.Debugf("getKeys start.namespace : %v, keys : %v, label : %v", group, keys, label)
 	// 1. prepare suffix
 	suffix := ""
 	if label != "" {
@@ -362,7 +404,7 @@ func (c *ConfigStore) getKeys(group string, keys []string, label string) ([]*con
 		value, err := c.kvRepo.Get(group, keyWithLabel)
 		if err != nil {
 			//log error and ignore this key
-			log.DefaultLogger.Errorf("error when querying configuration :%v", err)
+			c.log.Errorf("error when querying configuration :%v", err)
 			continue
 		}
 		item := &configstores.ConfigurationItem{}
@@ -373,7 +415,7 @@ func (c *ConfigStore) getKeys(group string, keys []string, label string) ([]*con
 		// query tags
 		item.Tags, err = c.getAllTags(group, keyWithLabel)
 		if err != nil {
-			log.DefaultLogger.Errorf("error when querying tags :%v", err)
+			c.log.Errorf("error when querying tags :%v", err)
 		}
 		res = append(res, item)
 	}
@@ -382,7 +424,7 @@ func (c *ConfigStore) getKeys(group string, keys []string, label string) ([]*con
 }
 
 func (c *ConfigStore) getAllWithAppId() ([]*configstores.ConfigurationItem, error) {
-	log.DefaultLogger.Debugf("getAllWithAppId start.namespace:%v", c.kvConfig.namespaceName)
+	c.log.Debugf("getAllWithAppId start.namespace:%v", c.kvConfig.namespaceName)
 	split := strings.Split(c.kvConfig.namespaceName, ",")
 	res := make([]*configstores.ConfigurationItem, 0, 10)
 	// loop every namespace in config
@@ -397,7 +439,7 @@ func (c *ConfigStore) getAllWithAppId() ([]*configstores.ConfigurationItem, erro
 }
 
 func (c *ConfigStore) getAllWithNamespace(group string) ([]*configstores.ConfigurationItem, error) {
-	log.DefaultLogger.Debugf("getAllWithNamespace start.namespace:%v", group)
+	c.log.Debugf("getAllWithNamespace start.namespace:%v", group)
 	res := make([]*configstores.ConfigurationItem, 0, 10)
 	// 1. loop query
 	err := c.kvRepo.Range(group, func(key, value interface{}) bool {
@@ -407,7 +449,7 @@ func (c *ConfigStore) getAllWithNamespace(group string) ([]*configstores.Configu
 		k := key.(string)
 		if k == "" {
 			//	never happen
-			log.DefaultLogger.Errorf("find configuration item with blank key under namespace:%v", group)
+			c.log.Errorf("find configuration item with blank key under namespace:%v", group)
 		} else {
 			split := strings.Split(k, defaultDelimiter)
 			item.Key = split[0]
@@ -417,7 +459,7 @@ func (c *ConfigStore) getAllWithNamespace(group string) ([]*configstores.Configu
 			// 1.2. query tags
 			tags, err := c.getAllTags(group, k)
 			if err != nil {
-				log.DefaultLogger.Errorf("error when querying tags :%v", err)
+				c.log.Errorf("error when querying tags :%v", err)
 			} else {
 				item.Tags = tags
 			}
@@ -450,6 +492,9 @@ func (c *ConfigStore) setItem(appId string, item *configstores.ConfigurationItem
 		return err
 	}
 	req, err := http.NewRequest("PUT", setUrl, strings.NewReader(string(reqBodyJson)))
+	if err != nil {
+		return err
+	}
 	// add params
 	q := req.URL.Query()
 	q.Add("createIfNotExists", "true")
@@ -468,7 +513,7 @@ func (c *ConfigStore) setItem(appId string, item *configstores.ConfigurationItem
 }
 
 func (c *ConfigStore) addHeaderForOpenAPI(req *http.Request) {
-	//https://ctripcorp.github.io/apollo/#/zh/usage/apollo-open-api-platform?id=_3211-%e4%bf%ae%e6%94%b9%e9%85%8d%e7%bd%ae%e6%8e%a5%e5%8f%a3
+	//https://www.apolloconfig.com/#/zh/usage/apollo-open-api-platform?id=_3211-%e4%bf%ae%e6%94%b9%e9%85%8d%e7%bd%ae%e6%8e%a5%e5%8f%a3
 	//Http Header中增加一个Authorization字段，字段值为申请的token
 	//Http Header的Content-Type字段需要设置成application/json;charset=UTF-8
 	req.Header.Add("Authorization", c.openAPIToken)
@@ -513,6 +558,9 @@ func (c *ConfigStore) commit(env string, appId string, cluster string, namespace
 		return err
 	}
 	req, err := http.NewRequest("POST", commitUrl, strings.NewReader(string(reqBodyJson)))
+	if err != nil {
+		return err
+	}
 	// add headers
 	c.addHeaderForOpenAPI(req)
 	// do request
@@ -531,6 +579,9 @@ func (c *ConfigStore) deleteItem(env string, appId string, cluster string, group
 	keyWithLabel := c.concatenateKey(key, label)
 	deleteUrl := fmt.Sprintf(deleteUrlTpl, c.openAPIAddress, env, appId, cluster, group, keyWithLabel)
 	req, err := http.NewRequest("DELETE", deleteUrl, nil)
+	if err != nil {
+		return err
+	}
 	// add params
 	q := req.URL.Query()
 	q.Add("key", keyWithLabel)
@@ -549,15 +600,18 @@ func (c *ConfigStore) deleteItem(env string, appId string, cluster string, group
 	return err
 }
 
-func (c *ConfigStore) initTagsClient(tagCfg *RepoConfig) error {
+func (c *ConfigStore) initTagsClient(tagCfg *repoConfig) error {
 	// 1. create if not exist
-	c.createNamespace(c.env, tagCfg.appId, tagCfg.cluster, c.tagsNamespace)
+	err := c.createNamespace(c.env, tagCfg.appId, tagCfg.cluster, c.tagsNamespace)
+	if err != nil {
+		return err
+	}
 	// 2. Connect
 	c.tagsRepo.SetConfig(tagCfg)
 	return c.tagsRepo.Connect()
 }
 
-//refer to https://ctripcorp.github.io/apollo/#/zh/usage/apollo-open-api-platform?id=_327-%e5%88%9b%e5%bb%banamespace
+// refer to https://www.apolloconfig.com/#/zh/usage/apollo-open-api-platform?id=_327-%e5%88%9b%e5%bb%banamespace
 func (c *ConfigStore) createNamespace(env string, appId string, cluster string, namespace string) error {
 	// 1. request
 	url := fmt.Sprintf(createNamespaceUrlTpl, c.openAPIAddress, appId)
@@ -574,8 +628,12 @@ func (c *ConfigStore) createNamespace(env string, appId string, cluster string, 
 		return err
 	}
 	req, err := http.NewRequest("POST", url, strings.NewReader(string(reqBodyJson)))
+	if err != nil {
+		return err
+	}
 	// add headers
 	c.addHeaderForOpenAPI(req)
+	c.log.Debugf("createNamespace url: %v, request body: %s, request: %+v", url, reqBodyJson, req)
 	// do request
 	resp, err := c.openAPIClient.Do(req)
 	// 2. parse
@@ -587,5 +645,24 @@ func (c *ConfigStore) createNamespace(env string, appId string, cluster string, 
 		// 4. commit
 		return c.commit(env, appId, cluster, namespace)
 	}
-	return nil
+	// if the namespace already exists, the status code will be 400
+	if resp.StatusCode == http.StatusBadRequest {
+		// log debug information
+		if log.ToLogPriority(c.log.GetLogLevel()) <= log.ToLogPriority(log.DebugLevel) {
+			b, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				c.log.Errorf("An error occurred when parsing createNamespace response. statusCode: %v ,error: %v", resp.StatusCode, err)
+				return err
+			}
+			c.log.Debugf("createNamespace not ok. StatusCode: %v, response body: %s", resp.StatusCode, b)
+		}
+		return nil
+	}
+	// Fail fast and take it as an startup error if the status code is neither 200 nor 400
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		c.log.Errorf("An error occurred when parsing createNamespace response. statusCode: %v ,error: %v", resp.StatusCode, err)
+		return err
+	}
+	return fmt.Errorf("createNamespace error. StatusCode: %v, response body: %s", resp.StatusCode, b)
 }

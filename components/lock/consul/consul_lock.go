@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,22 +10,43 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package consul
 
 import (
-	"github.com/hashicorp/consul/api"
-	"mosn.io/layotto/components/lock"
-	"mosn.io/layotto/components/pkg/utils"
-	msync "mosn.io/mosn/pkg/sync"
-	"mosn.io/pkg/log"
+	"context"
 	"runtime"
 	"strconv"
 	"sync"
+
+	"github.com/hashicorp/consul/api"
+	msync "mosn.io/mosn/pkg/sync"
+
+	log "mosn.io/layotto/kit/logger"
+
+	"mosn.io/layotto/components/lock"
+	"mosn.io/layotto/components/pkg/actuators"
+	"mosn.io/layotto/components/pkg/utils"
 )
+
+const (
+	componentName = "lock-consul"
+)
+
+var (
+	once               sync.Once
+	readinessIndicator *actuators.HealthIndicator
+	livenessIndicator  *actuators.HealthIndicator
+)
+
+func init() {
+	readinessIndicator = actuators.NewHealthIndicator()
+	livenessIndicator = actuators.NewHealthIndicator()
+}
 
 type ConsulLock struct {
 	metadata       utils.ConsulMetadata
-	logger         log.ErrorLogger
+	log            log.Logger
 	client         utils.ConsulClient
 	sessionFactory utils.SessionFactory
 	kv             utils.ConsulKV
@@ -34,14 +54,27 @@ type ConsulLock struct {
 	workPool       msync.WorkerPool
 }
 
-func NewConsulLock(logger log.ErrorLogger) *ConsulLock {
-	consulLock := &ConsulLock{logger: logger}
+func NewConsulLock() *ConsulLock {
+	once.Do(func() {
+		indicators := &actuators.ComponentsIndicator{ReadinessIndicator: readinessIndicator, LivenessIndicator: livenessIndicator}
+		actuators.SetComponentsIndicator(componentName, indicators)
+	})
+	consulLock := &ConsulLock{
+		log: log.NewLayottoLogger("lock/consul"),
+	}
+	log.RegisterComponentLoggerListener("lock/consul", consulLock)
 	return consulLock
+}
+
+func (c *ConsulLock) OnLogLevelChanged(outputLevel log.LogLevel) {
+	c.log.SetLogLevel(outputLevel)
 }
 
 func (c *ConsulLock) Init(metadata lock.Metadata) error {
 	consulMetadata, err := utils.ParseConsulMetadata(metadata)
 	if err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 		return err
 	}
 	c.metadata = consulMetadata
@@ -49,14 +82,27 @@ func (c *ConsulLock) Init(metadata lock.Metadata) error {
 		Address: consulMetadata.Address,
 		Scheme:  consulMetadata.Scheme,
 	})
+	if err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
+		return err
+	}
 	c.client = client
 	c.sessionFactory = client.Session()
 	c.kv = client.KV()
 	c.workPool = msync.NewWorkerPool(runtime.NumCPU())
+	readinessIndicator.SetStarted()
+	livenessIndicator.SetStarted()
 	return nil
 }
 func (c *ConsulLock) Features() []lock.Feature {
 	return nil
+}
+
+// LockKeepAlive try to renewal lease
+func (c *ConsulLock) LockKeepAlive(ctx context.Context, request *lock.LockKeepAliveRequest) (*lock.LockKeepAliveResponse, error) {
+	//TODO: implemnt function
+	return nil, nil
 }
 
 func getTTL(expire int32) string {
@@ -67,7 +113,7 @@ func getTTL(expire int32) string {
 	return strconv.Itoa(int(expire)) + "s"
 }
 
-func (c *ConsulLock) TryLock(req *lock.TryLockRequest) (*lock.TryLockResponse, error) {
+func (c *ConsulLock) TryLock(ctx context.Context, req *lock.TryLockRequest) (*lock.TryLockResponse, error) {
 
 	// create a session TTL
 	session, _, err := c.sessionFactory.Create(&api.SessionEntry{
@@ -96,14 +142,12 @@ func (c *ConsulLock) TryLock(req *lock.TryLockRequest) (*lock.TryLockResponse, e
 		return &lock.TryLockResponse{
 			Success: true,
 		}, nil
-	} else {
-		return &lock.TryLockResponse{
-			Success: false,
-		}, nil
 	}
-
+	return &lock.TryLockResponse{
+		Success: false,
+	}, nil
 }
-func (c *ConsulLock) Unlock(req *lock.UnlockRequest) (*lock.UnlockResponse, error) {
+func (c *ConsulLock) Unlock(ctx context.Context, req *lock.UnlockRequest) (*lock.UnlockResponse, error) {
 
 	session, ok := c.sMap.Load(req.LockOwner + "-" + req.ResourceId)
 
@@ -123,11 +167,10 @@ func (c *ConsulLock) Unlock(req *lock.UnlockRequest) (*lock.UnlockResponse, erro
 		c.sMap.Delete(req.LockOwner + "-" + req.ResourceId)
 		_, err = c.sessionFactory.Destroy(session.(string), nil)
 		if err != nil {
-			c.logger.Errorf("consul lock session destroy error: %v", err)
+			c.log.Errorf("consul lock session destroy error: %v", err)
 		}
 		return &lock.UnlockResponse{Status: lock.
 			SUCCESS}, nil
-	} else {
-		return &lock.UnlockResponse{Status: lock.LOCK_BELONG_TO_OTHERS}, nil
 	}
+	return &lock.UnlockResponse{Status: lock.LOCK_BELONG_TO_OTHERS}, nil
 }

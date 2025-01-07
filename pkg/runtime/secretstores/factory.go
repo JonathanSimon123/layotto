@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,14 +16,14 @@ import (
 	"github.com/dapr/components-contrib/secretstores"
 )
 
-type SecretStoresFactory struct {
-	Name          string
+type Factory struct {
+	CompType      string
 	FactoryMethod func() secretstores.SecretStore
 }
 
-func NewFactory(name string, f func() secretstores.SecretStore) *SecretStoresFactory {
-	return &SecretStoresFactory{
-		Name:          name,
+func NewFactory(compType string, f func() secretstores.SecretStore) *Factory {
+	return &Factory{
+		CompType:      compType,
 		FactoryMethod: f,
 	}
 }

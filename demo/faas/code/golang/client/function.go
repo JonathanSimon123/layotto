@@ -18,9 +18,10 @@ package main
 
 import (
 	"errors"
+	"strings"
+
 	"github.com/tetratelabs/proxy-wasm-go-sdk/proxywasm"
 	"github.com/tetratelabs/proxy-wasm-go-sdk/proxywasm/types"
-	"strings"
 )
 
 func main() {
@@ -95,7 +96,6 @@ func getQueryParam(body string, paramName string) (string, error) {
 	return "", errors.New("not found")
 }
 
-
 // Override types.DefaultHttpContext.
 func (ctx *httpHeaders) OnHttpStreamDone() {
 	proxywasm.LogInfof("%d finished", ctx.contextID)
@@ -104,6 +104,7 @@ func (ctx *httpHeaders) OnHttpStreamDone() {
 const ID = "id_1"
 
 // DO NOT MODIFY THE FOLLOWING FUNCTIONS!
+//
 //export proxy_get_id
 func GetID() {
 	_ = ID[len(ID)-1]

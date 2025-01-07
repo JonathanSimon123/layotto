@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,13 +17,13 @@ import (
 )
 
 type Factory struct {
-	Name          string
+	CompType      string
 	FactoryMethod func() sequencer.Store
 }
 
-func NewFactory(name string, f func() sequencer.Store) *Factory {
+func NewFactory(compType string, f func() sequencer.Store) *Factory {
 	return &Factory{
-		Name:          name,
+		CompType:      compType,
 		FactoryMethod: f,
 	}
 }

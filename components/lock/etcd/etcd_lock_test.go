@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +13,8 @@
 package etcd
 
 import (
+	"context"
 	"fmt"
-	"mosn.io/pkg/log"
 	"net/url"
 	"os"
 	"sync"
@@ -47,7 +46,7 @@ func TestEtcdLock_Init(t *testing.T) {
 		etcdServer.Server.Stop()
 		os.RemoveAll(etcdTestDir)
 	}()
-	comp := NewEtcdLock(log.DefaultLogger)
+	comp := NewEtcdLock()
 
 	cfg := lock.Metadata{
 		Properties: make(map[string]string),
@@ -81,7 +80,7 @@ func TestEtcdLock_Init(t *testing.T) {
 func TestEtcdLock_CreateConnTimeout(t *testing.T) {
 	var err error
 
-	comp := NewEtcdLock(log.DefaultLogger)
+	comp := NewEtcdLock()
 
 	cfg := lock.Metadata{
 		Properties: make(map[string]string),
@@ -111,7 +110,7 @@ func TestEtcdLock_TryLock(t *testing.T) {
 		os.RemoveAll(etcdTestDir)
 	}()
 
-	comp := NewEtcdLock(log.DefaultLogger)
+	comp := NewEtcdLock()
 
 	cfg := lock.Metadata{
 		Properties: make(map[string]string),
@@ -122,7 +121,7 @@ func TestEtcdLock_TryLock(t *testing.T) {
 	assert.NoError(t, err)
 
 	ownerId1 := uuid.New().String()
-	resp, err = comp.TryLock(&lock.TryLockRequest{
+	resp, err = comp.TryLock(context.TODO(), &lock.TryLockRequest{
 		ResourceId: resourceId,
 		LockOwner:  ownerId1,
 		Expire:     10,
@@ -131,7 +130,7 @@ func TestEtcdLock_TryLock(t *testing.T) {
 	assert.Equal(t, true, resp.Success)
 
 	//repeat
-	resp, err = comp.TryLock(&lock.TryLockRequest{
+	resp, err = comp.TryLock(context.TODO(), &lock.TryLockRequest{
 		ResourceId: resourceId,
 		LockOwner:  ownerId1,
 		Expire:     10,
@@ -145,7 +144,7 @@ func TestEtcdLock_TryLock(t *testing.T) {
 	go func() {
 		//another owner
 		ownerId2 := uuid.New().String()
-		resp, err = comp.TryLock(&lock.TryLockRequest{
+		resp, err = comp.TryLock(context.TODO(), &lock.TryLockRequest{
 			ResourceId: resourceId,
 			LockOwner:  ownerId2,
 			Expire:     10,
@@ -158,7 +157,7 @@ func TestEtcdLock_TryLock(t *testing.T) {
 	wg.Wait()
 
 	//another resource
-	resp, err = comp.TryLock(&lock.TryLockRequest{
+	resp, err = comp.TryLock(context.TODO(), &lock.TryLockRequest{
 		ResourceId: resourceId2,
 		LockOwner:  ownerId1,
 		Expire:     10,
@@ -182,7 +181,7 @@ func TestEtcdLock_UnLock(t *testing.T) {
 		os.RemoveAll(etcdTestDir)
 	}()
 
-	comp := NewEtcdLock(log.DefaultLogger)
+	comp := NewEtcdLock()
 
 	cfg := lock.Metadata{
 		Properties: make(map[string]string),
@@ -193,7 +192,7 @@ func TestEtcdLock_UnLock(t *testing.T) {
 	assert.NoError(t, err)
 
 	ownerId1 := uuid.New().String()
-	lockresp, err = comp.TryLock(&lock.TryLockRequest{
+	lockresp, err = comp.TryLock(context.TODO(), &lock.TryLockRequest{
 		ResourceId: resourceId3,
 		LockOwner:  ownerId1,
 		Expire:     10,
@@ -202,7 +201,7 @@ func TestEtcdLock_UnLock(t *testing.T) {
 	assert.Equal(t, true, lockresp.Success)
 
 	//error ownerid
-	resp, err = comp.Unlock(&lock.UnlockRequest{
+	resp, err = comp.Unlock(context.TODO(), &lock.UnlockRequest{
 		ResourceId: resourceId3,
 		LockOwner:  uuid.New().String(),
 	})
@@ -210,7 +209,7 @@ func TestEtcdLock_UnLock(t *testing.T) {
 	assert.Equal(t, lock.LOCK_BELONG_TO_OTHERS, resp.Status)
 
 	//error resourceid
-	resp, err = comp.Unlock(&lock.UnlockRequest{
+	resp, err = comp.Unlock(context.TODO(), &lock.UnlockRequest{
 		ResourceId: resourceId4,
 		LockOwner:  ownerId1,
 	})
@@ -218,12 +217,17 @@ func TestEtcdLock_UnLock(t *testing.T) {
 	assert.Equal(t, lock.LOCK_UNEXIST, resp.Status)
 
 	//success
-	resp, err = comp.Unlock(&lock.UnlockRequest{
+	resp, err = comp.Unlock(context.TODO(), &lock.UnlockRequest{
 		ResourceId: resourceId3,
 		LockOwner:  ownerId1,
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, lock.SUCCESS, resp.Status)
+
+	// not implement LockKeepAlive
+	keepAliveResp, err := comp.LockKeepAlive(context.TODO(), &lock.LockKeepAliveRequest{})
+	assert.Nil(t, keepAliveResp)
+	assert.Nil(t, err)
 }
 
 func startEtcdServer(dir string, port int) (*embed.Etcd, error) {

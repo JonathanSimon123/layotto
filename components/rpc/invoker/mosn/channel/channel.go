@@ -22,9 +22,10 @@ import (
 	"net"
 	"time"
 
+	"mosn.io/mosn/pkg/server"
+
 	common "mosn.io/layotto/components/pkg/common"
 	"mosn.io/layotto/components/rpc"
-	"mosn.io/mosn/pkg/server"
 )
 
 var (
@@ -36,7 +37,7 @@ var (
 		if lis == nil {
 			return common.Error(common.InternalCode, "[rpc]invalid listener name")
 		}
-		lis.GetListenerCallbacks().OnAccept(conn, false, nil, nil, nil)
+		lis.GetListenerCallbacks().OnAccept(conn, false, nil, nil, nil, nil)
 		return nil
 	}
 
@@ -51,7 +52,7 @@ type ChannelConfig struct {
 	Ext      map[string]interface{} `json:"ext"`
 }
 
-// GetChannel is get rpc.Channel by config.Protocol
+// GetChannel creates a rpc.Channel according to config.Protocol
 func GetChannel(config ChannelConfig) (rpc.Channel, error) {
 	c, ok := registry[config.Protocol]
 	if !ok {
@@ -65,7 +66,7 @@ func RegistChannel(proto string, f func(config ChannelConfig) (rpc.Channel, erro
 	registry[proto] = f
 }
 
-// simulate tcp connect
+// fakeTcpConn simulates tcp connection. It implements net.Conn
 type fakeTcpConn struct {
 	c net.Conn
 }

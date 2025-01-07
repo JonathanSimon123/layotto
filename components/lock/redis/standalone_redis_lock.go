@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,17 +10,27 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package redis
 
 import (
 	"context"
 	"fmt"
-	"github.com/go-redis/redis/v8"
-	"mosn.io/layotto/components/lock"
-	"mosn.io/layotto/components/pkg/utils"
-	"mosn.io/pkg/log"
 	"time"
+
+	"github.com/go-redis/redis/v8"
+
+	"mosn.io/layotto/kit/logger"
+
+	"mosn.io/layotto/components/lock"
+	"mosn.io/layotto/components/pkg/actuators"
+	"mosn.io/layotto/components/pkg/utils"
 )
+
+func init() {
+	readinessIndicator = actuators.NewHealthIndicator()
+	livenessIndicator = actuators.NewHealthIndicator()
+}
 
 // Standalone Redis lock store.Any fail-over related features are not supported,such as Sentinel and Redis Cluster.
 type StandaloneRedisLock struct {
@@ -29,20 +38,29 @@ type StandaloneRedisLock struct {
 	metadata utils.RedisMetadata
 
 	features []lock.Feature
-	logger   log.ErrorLogger
+	logger   logger.Logger
 
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
 // NewStandaloneRedisLock returns a new redis lock store
-func NewStandaloneRedisLock(logger log.ErrorLogger) *StandaloneRedisLock {
+func NewStandaloneRedisLock() *StandaloneRedisLock {
+	once.Do(func() {
+		indicators := &actuators.ComponentsIndicator{ReadinessIndicator: readinessIndicator, LivenessIndicator: livenessIndicator}
+		actuators.SetComponentsIndicator("lock-redis-standalone", indicators)
+	})
 	s := &StandaloneRedisLock{
 		features: make([]lock.Feature, 0),
-		logger:   logger,
+		logger:   logger.NewLayottoLogger("lock/standalone_redis"),
 	}
+	logger.RegisterComponentLoggerListener("lock/standalone_redis", s)
 
 	return s
+}
+
+func (p *StandaloneRedisLock) OnLogLevelChanged(outputLevel logger.LogLevel) {
+	p.logger.SetLogLevel(outputLevel)
 }
 
 // Init StandaloneRedisLock
@@ -50,6 +68,8 @@ func (p *StandaloneRedisLock) Init(metadata lock.Metadata) error {
 	// 1. parse config
 	m, err := utils.ParseRedisMetadata(metadata.Properties)
 	if err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 		return err
 	}
 	p.metadata = m
@@ -58,8 +78,12 @@ func (p *StandaloneRedisLock) Init(metadata lock.Metadata) error {
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	// 3. connect to redis
 	if _, err = p.client.Ping(p.ctx).Result(); err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 		return fmt.Errorf("[standaloneRedisLock]: error connecting to redis at %s: %s", m.Host, err)
 	}
+	readinessIndicator.SetStarted()
+	livenessIndicator.SetStarted()
 	return err
 }
 
@@ -68,8 +92,14 @@ func (p *StandaloneRedisLock) Features() []lock.Feature {
 	return p.features
 }
 
+// LockKeepAlive try to renewal lease
+func (p *StandaloneRedisLock) LockKeepAlive(ctx context.Context, request *lock.LockKeepAliveRequest) (*lock.LockKeepAliveResponse, error) {
+	//TODO: implemnt function
+	return nil, nil
+}
+
 // Node tries to acquire a redis lock
-func (p *StandaloneRedisLock) TryLock(req *lock.TryLockRequest) (*lock.TryLockResponse, error) {
+func (p *StandaloneRedisLock) TryLock(ctx context.Context, req *lock.TryLockRequest) (*lock.TryLockResponse, error) {
 	// 1.Setting redis expiration time
 	nx := p.client.SetNX(p.ctx, req.ResourceId, req.LockOwner, time.Second*time.Duration(req.Expire))
 	if nx == nil {
@@ -89,7 +119,7 @@ func (p *StandaloneRedisLock) TryLock(req *lock.TryLockRequest) (*lock.TryLockRe
 const unlockScript = "local v = redis.call(\"get\",KEYS[1]); if v==false then return -1 end; if v~=ARGV[1] then return -2 else return redis.call(\"del\",KEYS[1]) end"
 
 // Node tries to release a redis lock
-func (p *StandaloneRedisLock) Unlock(req *lock.UnlockRequest) (*lock.UnlockResponse, error) {
+func (p *StandaloneRedisLock) Unlock(ctx context.Context, req *lock.UnlockRequest) (*lock.UnlockResponse, error) {
 	// 1. delegate to client.eval lua script
 	eval := p.client.Eval(p.ctx, unlockScript, []string{req.ResourceId}, req.LockOwner)
 	// 2. check error

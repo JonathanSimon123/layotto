@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +14,9 @@ package utils
 
 import (
 	"errors"
+
 	"github.com/hashicorp/consul/api"
+
 	"mosn.io/layotto/components/lock"
 )
 

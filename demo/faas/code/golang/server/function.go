@@ -65,7 +65,7 @@ func (ctx *httpHeaders) OnHttpRequestBody(bodySize int, endOfStream bool) types.
 	bookName := string(body)
 
 	//2. get request state from redis by specific key through ABI
-	inventories, err := proxywasm.GetState("redis", bookName)
+	inventories, err := proxywasm.GetState("state_demo", bookName)
 	if err != nil {
 		proxywasm.LogErrorf("GetState failed: %v", err)
 		return types.ActionPause
@@ -84,6 +84,7 @@ func (ctx *httpHeaders) OnHttpStreamDone() {
 const ID = "id_2"
 
 // DO NOT MODIFY THE FOLLOWING FUNCTIONS!
+//
 //export proxy_get_id
 func GetID() {
 	_ = ID[len(ID)-1]

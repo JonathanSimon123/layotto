@@ -8,6 +8,7 @@ import (
 	"mosn.io/pkg/log"
 
 	"mosn.io/api"
+
 	ltrace "mosn.io/layotto/components/trace"
 )
 
@@ -17,7 +18,7 @@ const (
 	defaultGenerator   = "mosntracing"
 )
 
-//grpcTracer  is used to start a new Span
+// grpcTracer  is used to start a new Span
 type grpcTracer struct {
 	config map[string]interface{}
 }
@@ -45,6 +46,7 @@ func getActiveExportersFromConfig(config map[string]interface{}) []string {
 
 func (tracer *grpcTracer) Start(ctx context.Context, request interface{}, startTime time.Time) api.Span {
 	span := NewSpan(ctx, startTime, tracer.config)
+
 	return span
 }
 

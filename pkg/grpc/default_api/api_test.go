@@ -19,11 +19,13 @@ package default_api
 import (
 	"context"
 	"fmt"
-	"github.com/golang/mock/gomock"
-	"github.com/stretchr/testify/assert"
-	l8grpc "mosn.io/layotto/pkg/grpc"
 	"net"
 	"testing"
+
+	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/assert"
+
+	l8grpc "mosn.io/layotto/pkg/grpc"
 
 	"mosn.io/layotto/components/hello"
 	"mosn.io/layotto/components/rpc"
@@ -66,7 +68,7 @@ func TestSayHello(t *testing.T) {
 		api := &api{hellos: map[string]hello.HelloService{
 			"mock": mockHello,
 		}}
-		mockHello.EXPECT().Hello(gomock.Any()).Return(&hello.HelloReponse{
+		mockHello.EXPECT().Hello(gomock.Any()).Return(&hello.HelloResponse{
 			HelloString: "mock hello",
 		}, nil).Times(1)
 		resp, err := api.SayHello(context.Background(), &runtimev1pb.SayHelloRequest{
@@ -168,10 +170,21 @@ func TestInvokeService(t *testing.T) {
 			},
 		}
 
-		a := NewAPI("", nil, nil,
+		a := NewAPI(
+			"",
+			nil,
+			nil,
 			map[string]rpc.Invoker{
 				mosninvoker.Name: mockInvoker,
-			}, nil, nil, nil, nil, nil, nil, nil)
+			},
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+		)
 
 		_, err := a.InvokeService(context.Background(), in)
 		assert.Nil(t, err)

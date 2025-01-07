@@ -17,10 +17,13 @@
 package in_memory
 
 import (
-	"github.com/stretchr/testify/assert"
-	"mosn.io/layotto/components/lock"
+	"context"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+
+	"mosn.io/layotto/components/lock"
 )
 
 func TestNew(t *testing.T) {
@@ -57,12 +60,12 @@ func TestTryLock(t *testing.T) {
 
 	var err error
 	var resp *lock.TryLockResponse
-	resp, err = s.TryLock(req)
+	resp, err = s.TryLock(context.TODO(), req)
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.True(t, resp.Success)
 
-	resp, err = s.TryLock(req)
+	resp, err = s.TryLock(context.TODO(), req)
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.False(t, resp.Success)
@@ -73,7 +76,7 @@ func TestTryLock(t *testing.T) {
 		Expire:     1,
 	}
 
-	resp, err = s.TryLock(req)
+	resp, err = s.TryLock(context.TODO(), req)
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.True(t, resp.Success)
@@ -84,14 +87,14 @@ func TestTryLock(t *testing.T) {
 		Expire:     1,
 	}
 
-	resp, err = s.TryLock(req)
+	resp, err = s.TryLock(context.TODO(), req)
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.False(t, resp.Success)
 
 	s.data.locks["key112"].expireTime = time.Now().Add(-2 * time.Second)
 
-	resp, err = s.TryLock(req)
+	resp, err = s.TryLock(context.TODO(), req)
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.True(t, resp.Success)
@@ -109,7 +112,7 @@ func TestUnLock(t *testing.T) {
 
 	var err error
 	var resp *lock.UnlockResponse
-	resp, err = s.Unlock(req)
+	resp, err = s.Unlock(context.TODO(), req)
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.Equal(t, lock.LOCK_UNEXIST, resp.Status)
@@ -121,24 +124,24 @@ func TestUnLock(t *testing.T) {
 	}
 
 	var lockResp *lock.TryLockResponse
-	lockResp, err = s.TryLock(lockReq)
+	lockResp, err = s.TryLock(context.TODO(), lockReq)
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.True(t, lockResp.Success)
 
-	resp, err = s.Unlock(req)
+	resp, err = s.Unlock(context.TODO(), req)
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.Equal(t, lock.SUCCESS, resp.Status)
 
-	lockResp, err = s.TryLock(lockReq)
+	lockResp, err = s.TryLock(context.TODO(), lockReq)
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.True(t, lockResp.Success)
 
 	req.LockOwner = "1"
 
-	resp, err = s.Unlock(req)
+	resp, err = s.Unlock(context.TODO(), req)
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.Equal(t, lock.LOCK_BELONG_TO_OTHERS, resp.Status)
@@ -147,19 +150,23 @@ func TestUnLock(t *testing.T) {
 	lockReq.ResourceId = "11"
 	req.LockOwner = "own1"
 	lockReq.LockOwner = "own1"
-	lockResp, err = s.TryLock(lockReq)
+	lockResp, err = s.TryLock(context.TODO(), lockReq)
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.True(t, lockResp.Success)
 
-	resp, err = s.Unlock(req)
+	resp, err = s.Unlock(context.TODO(), req)
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.Equal(t, lock.SUCCESS, resp.Status)
 
-	resp, err = s.Unlock(req)
+	resp, err = s.Unlock(context.TODO(), req)
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.Equal(t, lock.LOCK_UNEXIST, resp.Status)
 
+	// not implement LockKeepAlive
+	keepAliveResp, err := s.LockKeepAlive(context.TODO(), &lock.LockKeepAliveRequest{})
+	assert.Nil(t, keepAliveResp)
+	assert.Nil(t, err)
 }

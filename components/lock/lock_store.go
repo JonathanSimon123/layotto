@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,13 +12,17 @@
 // limitations under the License.
 package lock
 
+import "context"
+
 type LockStore interface {
 	// Init lock
 	Init(metadata Metadata) error
 	// Get lock's features
 	Features() []Feature
 	// Node tries to acquire a lock
-	TryLock(req *TryLockRequest) (*TryLockResponse, error)
+	TryLock(ctx context.Context, req *TryLockRequest) (*TryLockResponse, error)
 	// Node tries to release a lock
-	Unlock(req *UnlockRequest) (*UnlockResponse, error)
+	Unlock(ctx context.Context, req *UnlockRequest) (*UnlockResponse, error)
+	// Node tries to renewal lease
+	LockKeepAlive(context.Context, *LockKeepAliveRequest) (*LockKeepAliveResponse, error)
 }

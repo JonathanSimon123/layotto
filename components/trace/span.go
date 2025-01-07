@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,6 +50,7 @@ func (span *Span) SpanId() string {
 func (span *Span) SetParentSpanId(id string) {
 	span.parentSpanId = id
 }
+
 func (span *Span) ParentSpanId() string {
 	return span.parentSpanId
 }

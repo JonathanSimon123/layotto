@@ -17,15 +17,17 @@ package dapr
 
 import (
 	"context"
+	"testing"
+
 	"github.com/dapr/components-contrib/secretstores"
 	"github.com/phayes/freeport"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
 	grpc_api "mosn.io/layotto/pkg/grpc"
 	dapr_v1pb "mosn.io/layotto/pkg/grpc/dapr/proto/runtime/v1"
 	"mosn.io/layotto/pkg/mock/components/secret"
-	"testing"
 )
 
 func TestNewDaprAPI_GetSecretStores(t *testing.T) {
@@ -116,9 +118,7 @@ func TestNewDaprAPI_GetSecretStores(t *testing.T) {
 	}
 	// Setup Dapr API server
 	grpcAPI := NewDaprAPI_Alpha(&grpc_api.ApplicationContext{
-		"", nil, nil, nil, nil,
-		nil, nil, nil, nil,
-		nil, fakeStores})
+		SecretStores: fakeStores})
 	err := grpcAPI.Init(nil)
 	if err != nil {
 		t.Errorf("grpcAPI.Init error")
@@ -190,9 +190,7 @@ func TestGetBulkSecret(t *testing.T) {
 	// Setup Dapr API server
 	// Setup Dapr API server
 	grpcAPI := NewDaprAPI_Alpha(&grpc_api.ApplicationContext{
-		"", nil, nil, nil, nil,
-		nil, nil, nil, nil,
-		nil, fakeStores})
+		SecretStores: fakeStores})
 	// Run test server
 	err := grpcAPI.Init(nil)
 	if err != nil {

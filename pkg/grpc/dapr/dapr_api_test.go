@@ -19,21 +19,24 @@ package dapr
 import (
 	"context"
 	"fmt"
+	"net"
+	"testing"
+
 	"github.com/dapr/components-contrib/bindings"
 	"github.com/dapr/components-contrib/state"
 	"github.com/golang/mock/gomock"
 	"github.com/phayes/freeport"
 	"github.com/stretchr/testify/assert"
+
 	grpc_api "mosn.io/layotto/pkg/grpc"
 	mock_state "mosn.io/layotto/pkg/mock/components/state"
-	"net"
-	"testing"
 
 	"errors"
+	"time"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"time"
 
 	dapr_v1pb "mosn.io/layotto/pkg/grpc/dapr/proto/runtime/v1"
 )
@@ -65,14 +68,13 @@ func TestNewDaprAPI_Alpha(t *testing.T) {
 	}
 	// construct API
 	grpcAPI := NewDaprAPI_Alpha(&grpc_api.ApplicationContext{
-		"", nil, nil, nil, nil,
-		map[string]state.Store{"mock": store}, nil, nil, nil,
-		func(name string, req *bindings.InvokeRequest) (*bindings.InvokeResponse, error) {
+		StateStores: map[string]state.Store{"mock": store},
+		SendToOutputBindingFn: func(name string, req *bindings.InvokeRequest) (*bindings.InvokeResponse, error) {
 			if name == "error-binding" {
 				return nil, errors.New("error when invoke binding")
 			}
 			return &bindings.InvokeResponse{Data: []byte("ok")}, nil
-		}, nil})
+		}})
 	err := grpcAPI.Init(nil)
 	if err != nil {
 		t.Errorf("grpcAPI.Init error")
@@ -108,7 +110,7 @@ func startDaprServerForTest(port int, srv DaprGrpcAPI) *grpc.Server {
 
 	server := grpc.NewServer()
 	go func() {
-		srv.Register(server, server)
+		srv.Register(server)
 		if err := server.Serve(lis); err != nil {
 			panic(err)
 		}

@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +12,14 @@
 // limitations under the License.
 package lock
 
+import "mosn.io/layotto/components/ref"
+
 type Feature string
 
 // Lock's metadata
 type Config struct {
+	ref.Config
+	Type     string            `json:"type"`
 	Metadata map[string]string `json:"metadata"`
 }
 
@@ -46,6 +49,17 @@ type UnlockRequest struct {
 // Status when releasing the lock
 type UnlockResponse struct {
 	Status LockStatus
+}
+
+type LockKeepAliveRequest struct {
+	ResourceId string
+	LockOwner  string
+	Expire     int32
+}
+
+type LockKeepAliveResponse struct {
+	ResourceId string
+	Status     LockStatus
 }
 
 type LockStatus int32

@@ -16,23 +16,30 @@
 
 package hello
 
-import "context"
+import (
+	"context"
+
+	"mosn.io/layotto/components/ref"
+)
 
 const ServiceName = "hello"
 
 type HelloService interface {
 	Init(*HelloConfig) error
-	Hello(context.Context, *HelloRequest) (*HelloReponse, error)
+	Hello(context.Context, *HelloRequest) (*HelloResponse, error)
 }
 
 type HelloConfig struct {
-	HelloString string `json:"hello"`
+	ref.Config
+	Type        string            `json:"type"`
+	HelloString string            `json:"hello"`
+	Metadata    map[string]string `json:"metadata"`
 }
 
 type HelloRequest struct {
 	Name string `json:"name"`
 }
 
-type HelloReponse struct {
+type HelloResponse struct {
 	HelloString string `json:"hello"`
 }

@@ -26,7 +26,8 @@
                       }
                     },
                     "state": {
-                      "redis": {
+                      "state_demo": {
+                        "type": "redis",
                         "metadata": {
                           "redisHost": "localhost:6379",
                           "redisPassword": ""
@@ -65,7 +66,7 @@
                   "name": "function1",
                   "instance_num": 1,
                   "vm_config": {
-                    "engine": "wasmer",
+                    "engine": "wasmtime",
                     "path": "demo/faas/code/golang/client/function_1.wasm"
                   }
                 },
@@ -73,16 +74,43 @@
                   "name": "function2",
                   "instance_num": 1,
                   "vm_config": {
-                    "engine": "wasmer",
+                    "engine": "wasmtime",
                     "path": "demo/faas/code/golang/server/function_2.wasm"
                   }
                 }
               }
             }
           ]
+        },
+        {
+          "name": "wasm_filter",
+          "address": "0.0.0.0:34998",
+          "bind_port": true,
+          "filter_chains": [
+            {
+              "filters": [
+                {
+                  "type": "proxy",
+                  "config": {
+                    "downstream_protocol": "Http1",
+                    "upstream_protocol": "Http1",
+                    "router_config_name": "wasm_router"
+                  }
+                }
+              ]
+            }
+          ],
+          "stream_filters": [
+            {
+              "type": "wasm_filter"
+            }
+          ]
         }
       ],
       "routers": [
+        {
+          "router_config_name": "wasm_router"
+        },
         {
           "router_config_name":"function_router",
           "virtual_hosts":[{
@@ -116,5 +144,48 @@
         ]
       }
     ]
+  },
+  "dynamic_resources": {
+    "lds_config": {
+      "ads": {},
+      "initial_fetch_timeout": "0s",
+      "resource_api_version": "V3"
+    },
+    "cds_config": {
+      "ads": {},
+      "initial_fetch_timeout": "0s",
+      "resource_api_version": "V3"
+    },
+    "ads_config": {
+      "api_type": "GRPC",
+      "set_node_on_first_message_only": true,
+      "transport_api_version": "V3",
+      "grpc_services": [{
+        "envoy_grpc": {
+          "cluster_name": "xds-grpc"
+        }
+      }]
+    }
+  },
+  "static_resources": {
+    "clusters": [{
+      "name": "xds-grpc",
+      "type": "STATIC",
+      "connect_timeout": "1s",
+      "lb_policy": "ROUND_ROBIN",
+      "load_assignment": {
+        "cluster_name": "xds-grpc",
+        "endpoints": [{
+          "lb_endpoints": [{
+            "endpoint": {
+              "address": {
+                "socket_address": {"address": "127.0.0.1", "port_value": 30681}
+              }
+            }
+          }
+          ]
+        }]
+      }
+    }]
   }
 }

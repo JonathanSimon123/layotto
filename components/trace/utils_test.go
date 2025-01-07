@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,14 +18,31 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	mosnctx "mosn.io/mosn/pkg/context"
 	"mosn.io/mosn/pkg/types"
+	"mosn.io/pkg/variable"
 )
 
 func TestSetExtraComponentInfo(t *testing.T) {
 	var span Span
-	ctx := mosnctx.WithValue(context.TODO(), types.ContextKeyActiveSpan, &span)
+	ctx := variable.NewVariableContext(context.TODO())
+	_ = variable.Set(ctx, types.VariableTraceSpan, &span)
 	SetExtraComponentInfo(ctx, "hello")
 	v := span.Tag(LAYOTTO_COMPONENT_DETAIL)
 	assert.Equal(t, v, "hello")
+}
+
+func TestSetterAndGetter(t *testing.T) {
+	var span Span
+	// ParentSpanId
+	span.SetParentSpanId("par")
+	v := span.ParentSpanId()
+	assert.Equal(t, v, "par")
+	// traceId
+	span.SetTraceId("traceId")
+	v = span.TraceId()
+	assert.Equal(t, v, "traceId")
+	// span id
+	span.SetSpanId("spanId")
+	v = span.SpanId()
+	assert.Equal(t, v, "spanId")
 }

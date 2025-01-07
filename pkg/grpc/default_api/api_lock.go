@@ -18,13 +18,15 @@ package default_api
 
 import (
 	"context"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"mosn.io/pkg/log"
+
 	"mosn.io/layotto/components/lock"
 	"mosn.io/layotto/pkg/messages"
 	runtime_lock "mosn.io/layotto/pkg/runtime/lock"
 	runtimev1pb "mosn.io/layotto/spec/proto/runtime/v1"
-	"mosn.io/pkg/log"
 )
 
 func (a *api) TryLock(ctx context.Context, req *runtimev1pb.TryLockRequest) (*runtimev1pb.TryLockResponse, error) {
@@ -61,7 +63,7 @@ func (a *api) TryLock(ctx context.Context, req *runtimev1pb.TryLockRequest) (*ru
 		return &runtimev1pb.TryLockResponse{}, err
 	}
 	// 4. delegate to the component
-	compResp, err := store.TryLock(compReq)
+	compResp, err := store.TryLock(ctx, compReq)
 	if err != nil {
 		log.DefaultLogger.Errorf("[runtime] [grpc.TryLock] error: %v", err)
 		return &runtimev1pb.TryLockResponse{}, err
@@ -101,7 +103,7 @@ func (a *api) Unlock(ctx context.Context, req *runtimev1pb.UnlockRequest) (*runt
 		return newInternalErrorUnlockResponse(), err
 	}
 	// 4. delegate to the component
-	compResp, err := store.Unlock(compReq)
+	compResp, err := store.Unlock(ctx, compReq)
 	if err != nil {
 		log.DefaultLogger.Errorf("[runtime] [grpc.Unlock] error: %v", err)
 		return newInternalErrorUnlockResponse(), err
@@ -109,6 +111,10 @@ func (a *api) Unlock(ctx context.Context, req *runtimev1pb.UnlockRequest) (*runt
 	// 5. convert response
 	resp := UnlockComp2GrpcResponse(compResp)
 	return resp, nil
+}
+
+func (a *api) LockKeepAlive(ctx context.Context, request *runtimev1pb.LockKeepAliveRequest) (*runtimev1pb.LockKeepAliveResponse, error) {
+	return nil, nil
 }
 
 func newInternalErrorUnlockResponse() *runtimev1pb.UnlockResponse {

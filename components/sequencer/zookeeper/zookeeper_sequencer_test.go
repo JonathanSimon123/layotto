@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +13,14 @@
 package zookeeper
 
 import (
+	"testing"
+
 	"github.com/go-zookeeper/zk"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
+
 	"mosn.io/layotto/components/pkg/mock"
 	"mosn.io/layotto/components/sequencer"
-	"mosn.io/pkg/log"
-	"testing"
 )
 
 const key = "resoure_1"
@@ -33,7 +33,7 @@ func TestZookeeperSequencer_GetNextId(t *testing.T) {
 		},
 	}
 
-	comp := NewZookeeperSequencer(log.DefaultLogger)
+	comp := NewZookeeperSequencer()
 	comp.Init(cfg)
 
 	//mock

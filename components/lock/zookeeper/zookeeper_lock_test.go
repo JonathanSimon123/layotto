@@ -11,17 +11,23 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package zookeeper
 
 import (
+	"context"
+	"os"
+	"testing"
+	"time"
+
+	"mosn.io/layotto/components/pkg/utils"
+
 	"github.com/go-zookeeper/zk"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
+
 	"mosn.io/layotto/components/lock"
 	"mosn.io/layotto/components/pkg/mock"
-	"mosn.io/pkg/log"
-	"testing"
-	"time"
 )
 
 const resouseId = "resoure_1"
@@ -33,18 +39,21 @@ var cfg = lock.Metadata{
 	Properties: make(map[string]string),
 }
 
-func TestMain(m *testing.M) {
+var mockCloseConn = func(conn utils.ZKConnection, expireInSecond int32) {
+}
 
+func TestMain(m *testing.M) {
+	closeConn = mockCloseConn
 	cfg.Properties["zookeeperHosts"] = "127.0.0.1;127.0.0.1"
 	cfg.Properties["zookeeperPassword"] = ""
-	m.Run()
+	os.Exit(m.Run())
 
 }
 
 // A lock ,A unlock
 func TestZookeeperLock_ALock_AUnlock(t *testing.T) {
 
-	comp := NewZookeeperLock(log.DefaultLogger)
+	comp := NewZookeeperLock()
 	comp.Init(cfg)
 
 	//mock
@@ -61,26 +70,25 @@ func TestZookeeperLock_ALock_AUnlock(t *testing.T) {
 	comp.unlockConn = unlockConn
 	comp.factory = factory
 
-	tryLock, err := comp.TryLock(&lock.TryLockRequest{
+	tryLock, err := comp.TryLock(context.TODO(), &lock.TryLockRequest{
 		ResourceId: resouseId,
 		LockOwner:  lockOwerA,
 		Expire:     expireTime,
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, tryLock.Success, true)
-	unlock, _ := comp.Unlock(&lock.UnlockRequest{
+	unlock, _ := comp.Unlock(context.TODO(), &lock.UnlockRequest{
 		ResourceId: resouseId,
 		LockOwner:  lockOwerA,
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, unlock.Status, lock.SUCCESS)
-
 }
 
 // A lock ,B unlock
 func TestZookeeperLock_ALock_BUnlock(t *testing.T) {
 
-	comp := NewZookeeperLock(log.DefaultLogger)
+	comp := NewZookeeperLock()
 	comp.Init(cfg)
 
 	//mock
@@ -96,26 +104,25 @@ func TestZookeeperLock_ALock_BUnlock(t *testing.T) {
 	comp.unlockConn = unlockConn
 	comp.factory = factory
 
-	tryLock, err := comp.TryLock(&lock.TryLockRequest{
+	tryLock, err := comp.TryLock(context.TODO(), &lock.TryLockRequest{
 		ResourceId: resouseId,
 		LockOwner:  lockOwerA,
 		Expire:     expireTime,
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, tryLock.Success, true)
-	unlock, err := comp.Unlock(&lock.UnlockRequest{
+	unlock, err := comp.Unlock(context.TODO(), &lock.UnlockRequest{
 		ResourceId: resouseId,
 		LockOwner:  lockOwerB,
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, unlock.Status, lock.LOCK_BELONG_TO_OTHERS)
-
 }
 
 // A lock , B lock ,A unlock ,B lock,B unlock
 func TestZookeeperLock_ALock_BLock_AUnlock_BLock_BUnlock(t *testing.T) {
 
-	comp := NewZookeeperLock(log.DefaultLogger)
+	comp := NewZookeeperLock()
 	comp.Init(cfg)
 
 	//mock
@@ -141,7 +148,7 @@ func TestZookeeperLock_ALock_BLock_AUnlock_BLock_BUnlock(t *testing.T) {
 	comp.factory = factory
 
 	//A lock
-	tryLock, err := comp.TryLock(&lock.TryLockRequest{
+	tryLock, err := comp.TryLock(context.TODO(), &lock.TryLockRequest{
 		ResourceId: resouseId,
 		LockOwner:  lockOwerA,
 		Expire:     expireTime,
@@ -149,7 +156,7 @@ func TestZookeeperLock_ALock_BLock_AUnlock_BLock_BUnlock(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, true, tryLock.Success)
 	//B lock
-	tryLock, err = comp.TryLock(&lock.TryLockRequest{
+	tryLock, err = comp.TryLock(context.TODO(), &lock.TryLockRequest{
 		ResourceId: resouseId,
 		LockOwner:  lockOwerB,
 		Expire:     expireTime,
@@ -157,7 +164,7 @@ func TestZookeeperLock_ALock_BLock_AUnlock_BLock_BUnlock(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, false, tryLock.Success)
 	//A unlock
-	unlock, _ := comp.Unlock(&lock.UnlockRequest{
+	unlock, _ := comp.Unlock(context.TODO(), &lock.UnlockRequest{
 		ResourceId: resouseId,
 		LockOwner:  lockOwerA,
 	})
@@ -165,7 +172,7 @@ func TestZookeeperLock_ALock_BLock_AUnlock_BLock_BUnlock(t *testing.T) {
 	assert.Equal(t, lock.SUCCESS, unlock.Status)
 
 	//B lock
-	tryLock, err = comp.TryLock(&lock.TryLockRequest{
+	tryLock, err = comp.TryLock(context.TODO(), &lock.TryLockRequest{
 		ResourceId: resouseId,
 		LockOwner:  lockOwerB,
 		Expire:     expireTime,
@@ -174,10 +181,15 @@ func TestZookeeperLock_ALock_BLock_AUnlock_BLock_BUnlock(t *testing.T) {
 	assert.Equal(t, true, tryLock.Success)
 
 	//B unlock
-	unlock, _ = comp.Unlock(&lock.UnlockRequest{
+	unlock, _ = comp.Unlock(context.TODO(), &lock.UnlockRequest{
 		ResourceId: resouseId,
 		LockOwner:  lockOwerB,
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, lock.SUCCESS, unlock.Status)
+
+	// not implement LockKeepAlive
+	keepAliveResp, err := comp.LockKeepAlive(context.TODO(), &lock.LockKeepAliveRequest{})
+	assert.Nil(t, keepAliveResp)
+	assert.Nil(t, err)
 }

@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +13,11 @@
 package wasm
 
 import (
-	"mosn.io/pkg/utils"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"mosn.io/pkg/utils"
 
 	v2 "mosn.io/mosn/pkg/config/v2"
 	"mosn.io/mosn/pkg/log"
@@ -103,6 +103,35 @@ func addWatchFile(cfg *filterConfigItem, factory *FilterConfigFactory) {
 	log.DefaultLogger.Infof("[proxywasm] [watcher] addWatchFile start to watch wasm file and its dir: %s", path)
 }
 
+// remove watching file
+func removeWatchFile(cfg *filterConfigItem) {
+	path := cfg.VmConfig.Path
+	// Add starts watching the named file or directory (non-recursively).
+	if err := watcher.Remove(path); err != nil {
+		log.DefaultLogger.Errorf("[proxywasm] [watcher] removeWatchFile fail to stop watch wasm file, err: %v", err)
+	}
+
+	delete(configs, path)
+	delete(factories, path)
+
+	dir := filepath.Dir(path)
+	canRemoveDirWatcher := true
+	for key := range configs {
+		if strings.HasPrefix(key, dir) {
+			canRemoveDirWatcher = false
+			break
+		}
+	}
+	if canRemoveDirWatcher {
+		if err := watcher.Remove(dir); err != nil {
+			log.DefaultLogger.Errorf("[proxywasm] [watcher] removeWatchFile fail to stop watch wasm dir, err: %v", err)
+			return
+		}
+	}
+
+	log.DefaultLogger.Infof("[proxywasm] [watcher] removeWatchFile stop to watch wasm file and its dir: %s", path)
+}
+
 // Reload Wasm's configuration file
 func reloadWasm(fullPath string) {
 	found := false
@@ -132,8 +161,9 @@ func reloadWasm(fullPath string) {
 
 			factory := factories[path]
 			config.VmConfig = pw.GetConfig().VmConfig
-			factory.config = append(factory.config, config)
-
+			factory.config = append(filter(factory.config, func(item *filterConfigItem) bool {
+				return item.PluginName != config.PluginName
+			}).([]*filterConfigItem), config)
 			wasmPlugin := &WasmPlugin{
 				pluginName:    config.PluginName,
 				plugin:        pw.GetPlugin(),
@@ -169,7 +199,7 @@ func fileExist(file string) bool {
 
 // Check the file suffix of wasm
 func pathIsWasmFile(fullPath string) bool {
-	for path, _ := range configs {
+	for path := range configs {
 		if strings.HasSuffix(fullPath, path) {
 			return true
 		}

@@ -19,6 +19,8 @@ package dapr
 import (
 	"context"
 	"errors"
+	"strings"
+
 	"github.com/dapr/components-contrib/bindings"
 	"github.com/dapr/components-contrib/pubsub"
 	"github.com/dapr/components-contrib/secretstores"
@@ -29,6 +31,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
+	"mosn.io/pkg/log"
+
 	"mosn.io/layotto/components/configstores"
 	"mosn.io/layotto/components/file"
 	"mosn.io/layotto/components/hello"
@@ -39,12 +43,8 @@ import (
 	"mosn.io/layotto/components/sequencer"
 	grpc_api "mosn.io/layotto/pkg/grpc"
 	dapr_common_v1pb "mosn.io/layotto/pkg/grpc/dapr/proto/common/v1"
-	"mosn.io/layotto/pkg/grpc/dapr/proto/runtime/v1"
 	dapr_v1pb "mosn.io/layotto/pkg/grpc/dapr/proto/runtime/v1"
 	"mosn.io/layotto/pkg/messages"
-	mgrpc "mosn.io/mosn/pkg/filter/network/grpc"
-	"mosn.io/pkg/log"
-	"strings"
 )
 
 type DaprGrpcAPI interface {
@@ -66,7 +66,8 @@ type daprGrpcAPI struct {
 	sendToOutputBindingFn    func(name string, req *bindings.InvokeRequest) (*bindings.InvokeResponse, error)
 	secretStores             map[string]secretstores.SecretStore
 	// app callback
-	AppCallbackConn *grpc.ClientConn
+	AppCallbackConn   *grpc.ClientConn
+	topicPerComponent map[string]TopicSubscriptions
 	// json
 	json jsoniter.API
 }
@@ -77,17 +78,12 @@ func (d *daprGrpcAPI) Init(conn *grpc.ClientConn) error {
 	return d.startSubscribing()
 }
 
-func (d *daprGrpcAPI) startSubscribing() error {
-	// TODO
+func (d *daprGrpcAPI) Register(rawGrpcServer *grpc.Server) error {
+	dapr_v1pb.RegisterDaprServer(rawGrpcServer, d)
 	return nil
 }
 
-func (d *daprGrpcAPI) Register(s *grpc.Server, registeredServer mgrpc.RegisteredServer) (mgrpc.RegisteredServer, error) {
-	dapr_v1pb.RegisterDaprServer(s, d)
-	return registeredServer, nil
-}
-
-func (d *daprGrpcAPI) InvokeService(ctx context.Context, in *runtime.InvokeServiceRequest) (*dapr_common_v1pb.InvokeResponse, error) {
+func (d *daprGrpcAPI) InvokeService(ctx context.Context, in *dapr_v1pb.InvokeServiceRequest) (*dapr_common_v1pb.InvokeResponse, error) {
 	// 1. convert request to RPCRequest,which is the parameter for RPC components
 	msg := in.GetMessage()
 	req := &rpc.RPCRequest{
@@ -121,6 +117,10 @@ func (d *daprGrpcAPI) InvokeService(ctx context.Context, in *runtime.InvokeServi
 	if err != nil {
 		return nil, runtime_common.ToGrpcError(err)
 	}
+	// 5. convert result
+	if !resp.Success && resp.Error != nil {
+		return nil, runtime_common.ToGrpcError(resp.Error)
+	}
 
 	if resp.Header != nil {
 		header := metadata.Pairs()
@@ -139,7 +139,7 @@ func (d *daprGrpcAPI) InvokeService(ctx context.Context, in *runtime.InvokeServi
 	}, nil
 }
 
-func (d *daprGrpcAPI) InvokeBinding(ctx context.Context, in *runtime.InvokeBindingRequest) (*runtime.InvokeBindingResponse, error) {
+func (d *daprGrpcAPI) InvokeBinding(ctx context.Context, in *dapr_v1pb.InvokeBindingRequest) (*dapr_v1pb.InvokeBindingResponse, error) {
 	req := &bindings.InvokeRequest{
 		Metadata:  in.Metadata,
 		Operation: bindings.OperationKind(in.Operation),

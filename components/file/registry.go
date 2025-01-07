@@ -23,18 +23,18 @@ import (
 )
 
 type Registry interface {
-	Register(fs ...*FileFactory)
-	Create(name string) (File, error)
+	Register(fs ...*Factory)
+	Create(compType string) (File, error)
 }
 
-type FileFactory struct {
-	Name          string
+type Factory struct {
+	CompType      string
 	FactoryMethod func() File
 }
 
-func NewFileFactory(name string, f func() File) *FileFactory {
-	return &FileFactory{
-		Name:          name,
+func NewFileFactory(CompType string, f func() File) *Factory {
+	return &Factory{
+		CompType:      CompType,
 		FactoryMethod: f,
 	}
 }
@@ -52,17 +52,17 @@ func NewRegistry(info *info.RuntimeInfo) Registry {
 	}
 }
 
-func (r *FileStoreRegistry) Register(fs ...*FileFactory) {
+func (r *FileStoreRegistry) Register(fs ...*Factory) {
 	for _, f := range fs {
-		r.files[f.Name] = f.FactoryMethod
-		r.info.RegisterComponent(ServiceName, f.Name)
+		r.files[f.CompType] = f.FactoryMethod
+		r.info.RegisterComponent(ServiceName, f.CompType)
 	}
 }
 
-func (r *FileStoreRegistry) Create(name string) (File, error) {
-	if f, ok := r.files[name]; ok {
-		r.info.LoadComponent(ServiceName, name)
+func (r *FileStoreRegistry) Create(compType string) (File, error) {
+	if f, ok := r.files[compType]; ok {
+		r.info.LoadComponent(ServiceName, compType)
 		return f(), nil
 	}
-	return nil, fmt.Errorf("service component %s is not regsitered", name)
+	return nil, fmt.Errorf("service component %s is not regsitered", compType)
 }

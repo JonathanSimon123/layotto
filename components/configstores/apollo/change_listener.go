@@ -17,29 +17,35 @@
 package apollo
 
 import (
-	"github.com/zouyx/agollo/v4/storage"
-	"mosn.io/layotto/components/configstores"
-	"mosn.io/pkg/log"
 	"time"
+
+	"github.com/apolloconfig/agollo/v4/storage"
+
+	"mosn.io/layotto/kit/logger"
+
+	"mosn.io/layotto/components/configstores"
 )
 
 type changeListener struct {
 	subscribers *subscriberHolder
 	timeout     time.Duration
 	store       RepoForListener
+	logger      logger.Logger
 }
 
 type RepoForListener interface {
 	splitKey(keyWithLabel string) (key string, label string)
 	getAllTags(group string, keyWithLabel string) (tags map[string]string, err error)
 	GetAppId() string
+	GetStoreName() string
 }
 
-func newChangeListener(c RepoForListener) *changeListener {
+func newChangeListener(c RepoForListener, log logger.Logger) *changeListener {
 	return &changeListener{
 		subscribers: newSubscriberHolder(),
 		timeout:     time.Duration(defaultTimeoutWhenResponse) * time.Millisecond,
 		store:       c,
+		logger:      log,
 	}
 }
 
@@ -69,7 +75,7 @@ func (lis *changeListener) notify(s *subscriber, keyWithLabel string, change *st
 	// 1 recover panic caused when interacting with the chan
 	defer func() {
 		if r := recover(); r != nil {
-			log.DefaultLogger.Errorf("panic when notify subscriber. %v", r)
+			lis.logger.Errorf("panic when notify subscriber. %v", r)
 			// make sure unused chan are all deleted
 			if lis != nil && lis.subscribers != nil {
 				lis.subscribers.remove(s)
@@ -77,7 +83,7 @@ func (lis *changeListener) notify(s *subscriber, keyWithLabel string, change *st
 		}
 	}()
 	// 2 prepare response
-	res := &configstores.SubscribeResp{StoreName: storename, AppId: lis.store.GetAppId()}
+	res := &configstores.SubscribeResp{StoreName: lis.store.GetStoreName(), AppId: lis.store.GetAppId()}
 	item := &configstores.ConfigurationItem{}
 	item.Group = s.group
 	item.Key, item.Label = lis.store.splitKey(keyWithLabel)
@@ -87,7 +93,7 @@ func (lis *changeListener) notify(s *subscriber, keyWithLabel string, change *st
 		tags, err := lis.store.getAllTags(s.group, keyWithLabel)
 		if err != nil {
 			//	log and ignore
-			log.DefaultLogger.Errorf("Error when querying tags in change_listener: %v", err)
+			lis.logger.Errorf("Error when querying tags in change_listener: %v", err)
 		} else {
 			item.Tags = tags
 		}

@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,59 +10,104 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package etcdv3
 
 import (
 	"context"
 	"fmt"
-	"mosn.io/pkg/utils"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"mosn.io/pkg/utils"
+
+	"mosn.io/layotto/components/pkg/actuators"
+
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+
+	log "mosn.io/layotto/kit/logger"
+
 	"mosn.io/layotto/components/configstores"
 	"mosn.io/layotto/components/trace"
-	"mosn.io/pkg/log"
 )
 
+const (
+	defaultGroup  = "default"
+	defaultLabel  = "default"
+	componentName = "configstore-etcdv3"
+)
+
+var (
+	once               sync.Once
+	readinessIndicator *actuators.HealthIndicator
+	livenessIndicator  *actuators.HealthIndicator
+)
+
+func init() {
+	readinessIndicator = actuators.NewHealthIndicator()
+	livenessIndicator = actuators.NewHealthIndicator()
+}
+
 type EtcdV3ConfigStore struct {
-	name   string
 	client *clientv3.Client
 	sync.RWMutex
 	subscribeKey map[string]string
 	appIdKey     string
+	storeName    string
 	// cancel is the func, call cancel will stop watching on the appIdKey
 	cancel       context.CancelFunc
 	watchStarted bool
 	watchRespCh  chan *configstores.SubscribeResp
+	log          log.Logger
 }
 
 func (c *EtcdV3ConfigStore) GetDefaultGroup() string {
-	return "default"
+	return defaultGroup
 }
 
 func (c *EtcdV3ConfigStore) GetDefaultLabel() string {
-	return "default"
+	return defaultLabel
+}
+
+func (c *EtcdV3ConfigStore) OnLogLevelChanged(outputLevel log.LogLevel) {
+	c.log.SetLogLevel(outputLevel)
 }
 
 func NewStore() configstores.Store {
-	return &EtcdV3ConfigStore{subscribeKey: make(map[string]string), watchRespCh: make(chan *configstores.SubscribeResp)}
+	once.Do(func() {
+		indicators := &actuators.ComponentsIndicator{ReadinessIndicator: readinessIndicator, LivenessIndicator: livenessIndicator}
+		actuators.SetComponentsIndicator(componentName, indicators)
+	})
+	cs := &EtcdV3ConfigStore{
+		subscribeKey: make(map[string]string),
+		watchRespCh:  make(chan *configstores.SubscribeResp),
+		log:          log.NewLayottoLogger("configstore/etcdv3"),
+	}
+	log.RegisterComponentLoggerListener("configstore/etcdv3", cs)
+	return cs
 }
 
-//Init init the configuration store.
+// Init init the configuration store.
 func (c *EtcdV3ConfigStore) Init(config *configstores.StoreConfig) error {
 	t, err := strconv.Atoi(config.TimeOut)
 	if err != nil {
-		log.DefaultLogger.Errorf("wrong configuration for time out configuration: %+v, set default value(10s)", config.TimeOut)
+		c.log.Errorf("wrong configuration for time out configuration: %+v, set default value(10s)", config.TimeOut)
 		t = 10
 	}
 	c.client, err = clientv3.New(clientv3.Config{
 		Endpoints:   config.Address,
 		DialTimeout: time.Duration(t) * time.Second,
 	})
+	c.storeName = config.StoreName
+	if err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
+	}
+	readinessIndicator.SetStarted()
+	livenessIndicator.SetStarted()
 	return err
 }
 
@@ -122,7 +166,7 @@ func (c *EtcdV3ConfigStore) Get(ctx context.Context, req *configstores.GetReques
 	keyValues, err := c.client.Get(ctx, "/"+req.AppId, clientv3.WithPrefix())
 	res := make([]*configstores.ConfigurationItem, 0)
 	if err != nil {
-		log.DefaultLogger.Errorf("fail get all group key-value,err: %+v", err)
+		c.log.Errorf("fail get all group key-value,err: %+v", err)
 		return nil, err
 	}
 	targetString[configstores.Group] = req.Group
@@ -144,7 +188,7 @@ func (c *EtcdV3ConfigStore) Set(ctx context.Context, req *configstores.SetReques
 		for _, key := range c.ParseKey(req.AppId, item) {
 			_, err := c.client.Put(ctx, key, item.Content)
 			if err != nil {
-				log.DefaultLogger.Errorf("set key[%+v] failed with error: %+v", key, err)
+				c.log.Errorf("set key[%+v] failed with error: %+v", key, err)
 				return err
 			}
 		}
@@ -158,7 +202,7 @@ func (c *EtcdV3ConfigStore) Delete(ctx context.Context, req *configstores.Delete
 		res := "/" + req.AppId + "/" + req.Group + "/" + req.Label + "/" + key
 		_, err := c.client.Delete(ctx, res, clientv3.WithPrefix())
 		if err != nil {
-			log.DefaultLogger.Errorf("delete key[%+v] failed with error: %+v", key, err)
+			c.log.Errorf("delete key[%+v] failed with error: %+v", key, err)
 			return err
 		}
 	}
@@ -166,7 +210,7 @@ func (c *EtcdV3ConfigStore) Delete(ctx context.Context, req *configstores.Delete
 }
 
 func (c *EtcdV3ConfigStore) processWatchResponse(resp *clientv3.WatchResponse) {
-	res := &configstores.SubscribeResp{StoreName: "etcd", AppId: c.appIdKey}
+	res := &configstores.SubscribeResp{StoreName: c.storeName, AppId: c.appIdKey}
 	item := &configstores.ConfigurationItem{}
 	if len(resp.Events) == 0 {
 		return

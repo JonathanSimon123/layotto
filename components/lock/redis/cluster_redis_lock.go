@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,43 +10,72 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package redis
 
 import (
 	"context"
 	"fmt"
-	"github.com/go-redis/redis/v8"
-	"mosn.io/layotto/components/lock"
-	"mosn.io/layotto/components/pkg/utils"
-	msync "mosn.io/mosn/pkg/sync"
-	"mosn.io/pkg/log"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-redis/redis/v8"
+	msync "mosn.io/mosn/pkg/sync"
+
+	"mosn.io/layotto/kit/logger"
+
+	"mosn.io/layotto/components/lock"
+	"mosn.io/layotto/components/pkg/actuators"
+	"mosn.io/layotto/components/pkg/utils"
 )
 
-//RedLock
-//it will be best to use at least 5 hosts
+const (
+	componentName = "lock-redis-cluster"
+)
+
+var (
+	once               sync.Once
+	readinessIndicator *actuators.HealthIndicator
+	livenessIndicator  *actuators.HealthIndicator
+)
+
+func init() {
+	readinessIndicator = actuators.NewHealthIndicator()
+	livenessIndicator = actuators.NewHealthIndicator()
+}
+
+// RedLock
+// it will be best to use at least 5 hosts
 type ClusterRedisLock struct {
 	clients  []*redis.Client
 	metadata utils.RedisClusterMetadata
 	workpool msync.WorkerPool
 
 	features []lock.Feature
-	logger   log.ErrorLogger
+	logger   logger.Logger
 
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
 // NewClusterRedisLock returns a new redis lock store
-func NewClusterRedisLock(logger log.ErrorLogger) *ClusterRedisLock {
+func NewClusterRedisLock() *ClusterRedisLock {
+	once.Do(func() {
+		indicators := &actuators.ComponentsIndicator{ReadinessIndicator: readinessIndicator, LivenessIndicator: livenessIndicator}
+		actuators.SetComponentsIndicator(componentName, indicators)
+	})
 	s := &ClusterRedisLock{
 		features: make([]lock.Feature, 0),
-		logger:   logger,
+		logger:   logger.NewLayottoLogger("lock/redis"),
 	}
 
+	logger.RegisterComponentLoggerListener("lock/redis", s)
 	return s
+}
+
+func (c *ClusterRedisLock) OnLogLevelChanged(outputLevel logger.LogLevel) {
+	c.logger.SetLogLevel(outputLevel)
 }
 
 type resultMsg struct {
@@ -61,6 +89,8 @@ func (c *ClusterRedisLock) Init(metadata lock.Metadata) error {
 
 	m, err := utils.ParseRedisClusterMetadata(metadata.Properties)
 	if err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 		return err
 	}
 	c.metadata = m
@@ -69,9 +99,13 @@ func (c *ClusterRedisLock) Init(metadata lock.Metadata) error {
 	c.workpool = msync.NewWorkerPool(m.Concurrency)
 	for i, client := range c.clients {
 		if _, err = client.Ping(c.ctx).Result(); err != nil {
+			readinessIndicator.ReportError(err.Error())
+			livenessIndicator.ReportError(err.Error())
 			return fmt.Errorf("[ClusterRedisLock]: error connecting to redis at %s: %s", c.metadata.Hosts[i], err)
 		}
 	}
+	readinessIndicator.SetStarted()
+	livenessIndicator.SetStarted()
 	return err
 }
 
@@ -79,7 +113,13 @@ func (c *ClusterRedisLock) Features() []lock.Feature {
 	return c.features
 }
 
-func (c *ClusterRedisLock) TryLock(req *lock.TryLockRequest) (*lock.TryLockResponse, error) {
+// LockKeepAlive try to renewal lease
+func (c *ClusterRedisLock) LockKeepAlive(ctx context.Context, request *lock.LockKeepAliveRequest) (*lock.LockKeepAliveResponse, error) {
+	//TODO: implemnt function
+	return nil, nil
+}
+
+func (c *ClusterRedisLock) TryLock(ctx context.Context, req *lock.TryLockRequest) (*lock.TryLockResponse, error) {
 	//try to get lock on all redis nodes
 	intervalStart := utils.GetMiliTimestamp(time.Now().UnixNano())
 	//intervalLimit must be 1/10 of expire time to make sure time of lock far less than expire time
@@ -127,28 +167,27 @@ func (c *ClusterRedisLock) TryLock(req *lock.TryLockRequest) (*lock.TryLockRespo
 	if len(errorStrs) > 0 {
 		err = fmt.Errorf(strings.Join(errorStrs, "\n"))
 	}
-
 	//getting lock on majority of redis cluster will be regarded as locking success
 	if successCount*2 > len(c.clients) {
 		return &lock.TryLockResponse{
 			Success: true,
 		}, err
-	} else {
-		_, unlockErr := c.UnlockAllRedis(&lock.UnlockRequest{
-			ResourceId: req.ResourceId,
-			LockOwner:  req.LockOwner,
-		}, &wg)
-		if unlockErr != nil {
-			errorStrs = append(errorStrs, unlockErr.Error())
-			err = fmt.Errorf(strings.Join(errorStrs, "\n"))
-		}
-		return &lock.TryLockResponse{
-			Success: false,
-		}, err
 	}
+
+	_, unlockErr := c.UnlockAllRedis(&lock.UnlockRequest{
+		ResourceId: req.ResourceId,
+		LockOwner:  req.LockOwner,
+	}, &wg)
+	if unlockErr != nil {
+		errorStrs = append(errorStrs, unlockErr.Error())
+		err = fmt.Errorf(strings.Join(errorStrs, "\n"))
+	}
+	return &lock.TryLockResponse{
+		Success: false,
+	}, err
 }
 
-func (c *ClusterRedisLock) Unlock(req *lock.UnlockRequest) (*lock.UnlockResponse, error) {
+func (c *ClusterRedisLock) Unlock(ctx context.Context, req *lock.UnlockRequest) (*lock.UnlockResponse, error) {
 	wg := sync.WaitGroup{}
 	//err means there were some internal errors,then the status must be INTERNAL_ERROR
 	//the LOCK_UNEXIST and LOCK_BELONG_TO_OTHERS status codes can be ignore

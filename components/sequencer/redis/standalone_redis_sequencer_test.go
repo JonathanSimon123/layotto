@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,11 +14,12 @@ package redis
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/assert"
+
 	"mosn.io/layotto/components/sequencer"
-	"mosn.io/pkg/log"
-	"testing"
 )
 
 const key = "resource_xxx"
@@ -29,7 +29,7 @@ func TestStandaloneRedisSequencer(t *testing.T) {
 	assert.NoError(t, err)
 	defer s.Close()
 	// construct component
-	comp := NewStandaloneRedisSequencer(log.DefaultLogger)
+	comp := NewStandaloneRedisSequencer()
 	cfg := sequencer.Configuration{
 		Properties: make(map[string]string),
 	}
@@ -58,7 +58,7 @@ func TestStandaloneRedisSequencer_biggerThan_success(t *testing.T) {
 	assert.NoError(t, err)
 	defer s.Close()
 	// construct component
-	comp := NewStandaloneRedisSequencer(log.DefaultLogger)
+	comp := NewStandaloneRedisSequencer()
 	cfg := sequencer.Configuration{
 		Properties: make(map[string]string),
 	}
@@ -94,7 +94,7 @@ func TestStandaloneRedisSequencer_biggerThan_fail_reset(t *testing.T) {
 	assert.NoError(t, err)
 	defer s.Close()
 	// construct component
-	comp := NewStandaloneRedisSequencer(log.DefaultLogger)
+	comp := NewStandaloneRedisSequencer()
 	cfg := sequencer.Configuration{
 		Properties: make(map[string]string),
 	}
@@ -124,7 +124,7 @@ func TestStandaloneRedisSequencer_segment(t *testing.T) {
 	assert.NoError(t, err)
 	defer s.Close()
 	// construct component
-	comp := NewStandaloneRedisSequencer(log.DefaultLogger)
+	comp := NewStandaloneRedisSequencer()
 	cfg := sequencer.Configuration{
 		Properties: make(map[string]string),
 	}

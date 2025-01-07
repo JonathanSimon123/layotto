@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +14,6 @@ package etcd
 
 import (
 	"fmt"
-	"mosn.io/layotto/components/sequencer"
-	"mosn.io/pkg/log"
 	"net"
 	"net/url"
 	"os"
@@ -24,15 +21,13 @@ import (
 	"testing"
 	"time"
 
+	"mosn.io/layotto/components/sequencer"
+
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/server/v3/embed"
 )
 
 const key = "resource_xxx"
-const key2 = "resource_xxx2"
-
-const key3 = "resource_xxx3"
-const key4 = "resource_xxx4"
 
 // GetFreePort returns a free port from the OS.
 func GetFreePort() (int, error) {
@@ -62,7 +57,7 @@ func TestEtcd_Init(t *testing.T) {
 		etcdServer.Server.Stop()
 		os.RemoveAll(etcdTestDir)
 	}()
-	comp := NewEtcdSequencer(log.DefaultLogger)
+	comp := NewEtcdSequencer()
 
 	cfg := sequencer.Configuration{
 		BiggerThan: nil,
@@ -97,7 +92,7 @@ func TestEtcd_Init(t *testing.T) {
 func TestEtcd_CreateConnTimeout(t *testing.T) {
 	var err error
 
-	comp := NewEtcdSequencer(log.DefaultLogger)
+	comp := NewEtcdSequencer()
 
 	cfg := sequencer.Configuration{
 		BiggerThan: nil,
@@ -129,7 +124,7 @@ func TestEtcd_GetNextId(t *testing.T) {
 		os.RemoveAll(etcdTestDir)
 	}()
 
-	comp := NewEtcdSequencer(log.DefaultLogger)
+	comp := NewEtcdSequencer()
 
 	cfg := sequencer.Configuration{
 		BiggerThan: nil,
@@ -155,6 +150,9 @@ func TestEtcd_GetNextId(t *testing.T) {
 	expected = 2
 	assert.Equal(t, expected, resp.NextId)
 
+	support, _, err := comp.GetSegment(nil)
+	assert.False(t, support)
+	assert.Nil(t, err)
 }
 
 func startEtcdServer(dir string, port int) (*embed.Etcd, error) {

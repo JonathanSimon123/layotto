@@ -18,10 +18,14 @@ package info
 
 import (
 	"context"
-	"mosn.io/layotto/pkg/actuator"
+
 	"mosn.io/pkg/log"
+
+	"mosn.io/layotto/pkg/actuator"
+	"mosn.io/layotto/pkg/filter/stream/common/http"
 )
 
+// init info Endpoint.
 func init() {
 	actuator.GetDefault().AddEndpoint("info", NewEndpoint())
 }
@@ -35,9 +39,10 @@ func NewEndpoint() *Endpoint {
 	return &Endpoint{}
 }
 
-func (e *Endpoint) Handle(ctx context.Context, params actuator.ParamsScanner) (map[string]interface{}, error) {
+func (e *Endpoint) Handle(ctx context.Context, params http.ParamsScanner) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
-	var resultErr error = nil
+	var resultErr error
+	// handle the infoContributors
 	for k, c := range infoContributors {
 		cinfo, err := c.GetInfo()
 		if err != nil {

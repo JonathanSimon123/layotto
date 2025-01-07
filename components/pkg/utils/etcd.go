@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,11 +18,12 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"io/ioutil"
 	"strconv"
 	"strings"
 	"time"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 const (
@@ -140,18 +140,17 @@ func NewEtcdClient(meta EtcdMetadata) (*clientv3.Client, error) {
 		}
 		config.TLS = tlsConfig
 	}
-
-	if client, err := clientv3.New(config); err != nil {
+	client, err := clientv3.New(config)
+	if err != nil {
 		return nil, err
-	} else {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(meta.DialTimeout))
-		defer cancel()
-		//ping
-		_, err = client.Get(ctx, "ping")
-		if err != nil {
-			return nil, fmt.Errorf("etcd error: connect to etcd timeoout %s", meta.Endpoints)
-		}
-
-		return client, nil
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(meta.DialTimeout))
+	defer cancel()
+	//ping
+	_, err = client.Get(ctx, "ping")
+	if err != nil {
+		return nil, fmt.Errorf("etcd error: connect to etcd timeoout %s", meta.Endpoints)
+	}
+
+	return client, nil
 }

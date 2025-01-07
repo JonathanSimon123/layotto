@@ -17,8 +17,9 @@
 package runtime
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestWithErrInterceptor(t *testing.T) {
@@ -26,13 +27,7 @@ func TestWithErrInterceptor(t *testing.T) {
 	var f ErrInterceptor = func(err error, format string, args ...interface{}) {
 		cnt++
 	}
-	rt := &runtimeOptions{
-		services:    services{},
-		srvMaker:    nil,
-		errInt:      nil,
-		options:     nil,
-		apiFactorys: nil,
-	}
+	rt := newRuntimeOptions()
 	WithErrInterceptor(f)(rt)
 	rt.errInt(nil, "")
 	assert.True(t, cnt == 1)

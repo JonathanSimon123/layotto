@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +14,13 @@ package sequencer
 
 import (
 	"context"
+	"testing"
+
 	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/assert"
+
 	"mosn.io/layotto/components/sequencer"
 	"mosn.io/layotto/components/sequencer/redis"
-	"mosn.io/pkg/log"
-	"testing"
 )
 
 const keyXx = "resource_xxx"
@@ -31,7 +31,7 @@ func TestGetNextIdFromCache(t *testing.T) {
 	assert.NoError(t, err)
 	defer s.Close()
 	// construct componen
-	comp := redis.NewStandaloneRedisSequencer(log.DefaultLogger)
+	comp := redis.NewStandaloneRedisSequencer()
 	cfg := sequencer.Configuration{
 		Properties: make(map[string]string),
 	}

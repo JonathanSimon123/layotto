@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,15 +13,17 @@
 package mongo
 
 import (
+	"context"
+	"sync"
+	"testing"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+
 	"mosn.io/layotto/components/lock"
 	"mosn.io/layotto/components/pkg/mock"
-	"mosn.io/pkg/log"
-	"sync"
-	"testing"
 )
 
 const (
@@ -35,7 +36,7 @@ const (
 func TestMongoLock_Init(t *testing.T) {
 	var err error
 	var mongoUrl = "localhost:27017"
-	comp := NewMongoLock(log.DefaultLogger)
+	comp := NewMongoLock()
 
 	cfg := lock.Metadata{
 		Properties: make(map[string]string),
@@ -58,7 +59,7 @@ func TestMongoLock_TryLock(t *testing.T) {
 	var err error
 	var resp *lock.TryLockResponse
 	var mongoUrl = "localhost:xxxx"
-	comp := NewMongoLock(log.DefaultLogger)
+	comp := NewMongoLock()
 
 	cfg := lock.Metadata{
 		Properties: make(map[string]string),
@@ -85,7 +86,7 @@ func TestMongoLock_TryLock(t *testing.T) {
 	comp.client = &mockMongoClient
 
 	ownerId1 := uuid.New().String()
-	resp, err = comp.TryLock(&lock.TryLockRequest{
+	resp, err = comp.TryLock(context.TODO(), &lock.TryLockRequest{
 		ResourceId: resourceId,
 		LockOwner:  ownerId1,
 		Expire:     10,
@@ -93,7 +94,7 @@ func TestMongoLock_TryLock(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, true, resp.Success)
 
-	resp, err = comp.TryLock(&lock.TryLockRequest{
+	resp, err = comp.TryLock(context.TODO(), &lock.TryLockRequest{
 		ResourceId: resourceId,
 		LockOwner:  ownerId1,
 		Expire:     10,
@@ -106,7 +107,7 @@ func TestMongoLock_TryLock(t *testing.T) {
 
 	go func() {
 		ownerId2 := uuid.New().String()
-		resp, err = comp.TryLock(&lock.TryLockRequest{
+		resp, err = comp.TryLock(context.TODO(), &lock.TryLockRequest{
 			ResourceId: resourceId,
 			LockOwner:  ownerId2,
 			Expire:     10,
@@ -119,7 +120,7 @@ func TestMongoLock_TryLock(t *testing.T) {
 	wg.Wait()
 
 	//another resource
-	resp, err = comp.TryLock(&lock.TryLockRequest{
+	resp, err = comp.TryLock(context.TODO(), &lock.TryLockRequest{
 		ResourceId: resourceId2,
 		LockOwner:  ownerId1,
 		Expire:     10,
@@ -134,15 +135,14 @@ func TestMongoLock_Unlock(t *testing.T) {
 	var lockresp *lock.TryLockResponse
 	var mongoUrl = "localhost:xxxx"
 
-	comp := NewMongoLock(log.DefaultLogger)
+	comp := NewMongoLock()
 
 	cfg := lock.Metadata{
 		Properties: make(map[string]string),
 	}
 
 	cfg.Properties["mongoHost"] = mongoUrl
-	err = comp.Init(cfg)
-
+	_ = comp.Init(cfg)
 	// mock
 	insertManyResult := &mongo.InsertManyResult{}
 	insertOneResult := &mongo.InsertOneResult{}
@@ -162,7 +162,7 @@ func TestMongoLock_Unlock(t *testing.T) {
 	comp.client = &mockMongoClient
 
 	ownerId1 := uuid.New().String()
-	lockresp, err = comp.TryLock(&lock.TryLockRequest{
+	lockresp, err = comp.TryLock(context.TODO(), &lock.TryLockRequest{
 		ResourceId: resourceId3,
 		LockOwner:  ownerId1,
 		Expire:     10,
@@ -171,7 +171,7 @@ func TestMongoLock_Unlock(t *testing.T) {
 	assert.Equal(t, true, lockresp.Success)
 
 	//error resourceid
-	resp, err = comp.Unlock(&lock.UnlockRequest{
+	resp, err = comp.Unlock(context.TODO(), &lock.UnlockRequest{
 		ResourceId: resourceId4,
 		LockOwner:  ownerId1,
 	})
@@ -179,10 +179,15 @@ func TestMongoLock_Unlock(t *testing.T) {
 	assert.Equal(t, lock.LOCK_UNEXIST, resp.Status)
 
 	//success
-	resp, err = comp.Unlock(&lock.UnlockRequest{
+	resp, err = comp.Unlock(context.TODO(), &lock.UnlockRequest{
 		ResourceId: resourceId3,
 		LockOwner:  ownerId1,
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, lock.SUCCESS, resp.Status)
+
+	// not implement LockKeepAlive
+	keepAliveResp, err := comp.LockKeepAlive(context.TODO(), &lock.LockKeepAliveRequest{})
+	assert.Nil(t, keepAliveResp)
+	assert.Nil(t, err)
 }

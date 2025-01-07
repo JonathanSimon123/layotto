@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,21 +10,27 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package mongo
 
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 	"go.mongodb.org/mongo-driver/x/bsonx"
+
+	"mosn.io/layotto/kit/logger"
+
 	"mosn.io/layotto/components/lock"
+	"mosn.io/layotto/components/pkg/actuators"
 	"mosn.io/layotto/components/pkg/utils"
-	"mosn.io/pkg/log"
-	"time"
 )
 
 const (
@@ -35,7 +40,19 @@ const (
 	UNLOCK_UNEXIST          = 4
 	UNLOCK_BELONG_TO_OTHERS = 5
 	UNLOCK_FAIL             = 6
+	componentName           = "lock-mongo"
 )
+
+var (
+	once               sync.Once
+	readinessIndicator *actuators.HealthIndicator
+	livenessIndicator  *actuators.HealthIndicator
+)
+
+func init() {
+	readinessIndicator = actuators.NewHealthIndicator()
+	livenessIndicator = actuators.NewHealthIndicator()
+}
 
 // mongo lock store
 type MongoLock struct {
@@ -47,19 +64,28 @@ type MongoLock struct {
 	metadata   utils.MongoMetadata
 
 	features []lock.Feature
-	logger   log.ErrorLogger
+	logger   logger.Logger
 
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
 // NewMongoLock returns a new mongo lock
-func NewMongoLock(logger log.ErrorLogger) *MongoLock {
+func NewMongoLock() *MongoLock {
+	once.Do(func() {
+		indicators := &actuators.ComponentsIndicator{ReadinessIndicator: readinessIndicator, LivenessIndicator: livenessIndicator}
+		actuators.SetComponentsIndicator(componentName, indicators)
+	})
 	s := &MongoLock{
 		features: make([]lock.Feature, 0),
-		logger:   logger,
+		logger:   logger.NewLayottoLogger("lock/mongo"),
 	}
+	logger.RegisterComponentLoggerListener("lock/mongo", s)
 	return s
+}
+
+func (e *MongoLock) OnLogLevelChanged(outputLevel logger.LogLevel) {
+	e.logger.SetLogLevel(outputLevel)
 }
 
 func (e *MongoLock) Init(metadata lock.Metadata) error {
@@ -67,6 +93,8 @@ func (e *MongoLock) Init(metadata lock.Metadata) error {
 	// 1.parse config
 	m, err := utils.ParseMongoMetadata(metadata.Properties)
 	if err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 		return err
 	}
 	e.metadata = m
@@ -75,30 +103,37 @@ func (e *MongoLock) Init(metadata lock.Metadata) error {
 
 	// 2. construct client
 	if client, err = e.factory.NewMongoClient(m); err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 		return err
 	}
 
 	e.ctx, e.cancel = context.WithCancel(context.Background())
 
 	if err := client.Ping(e.ctx, nil); err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 		return err
 	}
-
 	// Connections Collection
-	e.collection, err = utils.SetCollection(e.client, e.factory, e.metadata)
+	e.collection, err = utils.SetCollection(client, e.factory, e.metadata)
 	if err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 		return err
 	}
 
 	// create exprie time index
 	indexModel := mongo.IndexModel{
-		Keys:    bsonx.Doc{{"Expire", bsonx.Int64(1)}},
+		Keys:    bsonx.Doc{{Key: "Expire", Value: bsonx.Int64(1)}},
 		Options: options.Index().SetExpireAfterSeconds(0),
 	}
 	e.collection.Indexes().CreateOne(e.ctx, indexModel)
 
 	e.client = client
 
+	readinessIndicator.SetStarted()
+	livenessIndicator.SetStarted()
 	return err
 }
 
@@ -107,7 +142,13 @@ func (e *MongoLock) Features() []lock.Feature {
 	return e.features
 }
 
-func (e *MongoLock) TryLock(req *lock.TryLockRequest) (*lock.TryLockResponse, error) {
+// LockKeepAlive try to renewal lease
+func (e *MongoLock) LockKeepAlive(ctx context.Context, request *lock.LockKeepAliveRequest) (*lock.LockKeepAliveResponse, error) {
+	//TODO: implemnt function
+	return nil, nil
+}
+
+func (e *MongoLock) TryLock(ctx context.Context, req *lock.TryLockRequest) (*lock.TryLockResponse, error) {
 	var err error
 	// create mongo session
 	e.session, err = e.client.StartSession()
@@ -159,14 +200,13 @@ func (e *MongoLock) TryLock(req *lock.TryLockRequest) (*lock.TryLockResponse, er
 		return &lock.TryLockResponse{
 			Success: true,
 		}, nil
-	} else {
-		return &lock.TryLockResponse{
-			Success: false,
-		}, nil
 	}
+	return &lock.TryLockResponse{
+		Success: false,
+	}, nil
 }
 
-func (e *MongoLock) Unlock(req *lock.UnlockRequest) (*lock.UnlockResponse, error) {
+func (e *MongoLock) Unlock(ctx context.Context, req *lock.UnlockRequest) (*lock.UnlockResponse, error) {
 	var err error
 	// create mongo session
 	e.session, err = e.client.StartSession()

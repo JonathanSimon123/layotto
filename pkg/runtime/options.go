@@ -18,7 +18,12 @@ package runtime
 
 import (
 	"google.golang.org/grpc"
+	"mosn.io/pkg/log"
+
+	"mosn.io/layotto/components/oss"
+
 	"mosn.io/layotto/components/configstores"
+	"mosn.io/layotto/components/custom"
 	"mosn.io/layotto/components/file"
 	"mosn.io/layotto/components/hello"
 	"mosn.io/layotto/components/rpc"
@@ -29,7 +34,6 @@ import (
 	msecretstores "mosn.io/layotto/pkg/runtime/secretstores"
 	runtime_sequencer "mosn.io/layotto/pkg/runtime/sequencer"
 	"mosn.io/layotto/pkg/runtime/state"
-	"mosn.io/pkg/log"
 )
 
 // services encapsulates the service to include in the runtime
@@ -37,14 +41,19 @@ type services struct {
 	hellos        []*hello.HelloFactory
 	configStores  []*configstores.StoreFactory
 	rpcs          []*rpc.Factory
-	files         []*file.FileFactory
+	files         []*file.Factory
+	oss           []*oss.Factory
 	pubSubs       []*pubsub.Factory
 	states        []*state.Factory
 	locks         []*runtime_lock.Factory
 	sequencers    []*runtime_sequencer.Factory
 	outputBinding []*mbindings.OutputBindingFactory
 	inputBinding  []*mbindings.InputBindingFactory
-	secretStores  []*msecretstores.SecretStoresFactory
+	secretStores  []*msecretstores.Factory
+	// Custom components.
+	// The key is component kind
+	custom map[string][]*custom.Factory
+	extensionComponentFactorys
 }
 
 type runtimeOptions struct {
@@ -56,6 +65,14 @@ type runtimeOptions struct {
 	options  []grpc.ServerOption
 	// new grpc api
 	apiFactorys []rgrpc.NewGrpcAPI
+}
+
+func newRuntimeOptions() *runtimeOptions {
+	return &runtimeOptions{
+		services: services{
+			custom: make(map[string][]*custom.Factory),
+		},
+	}
 }
 
 type Option func(o *runtimeOptions)
@@ -89,7 +106,14 @@ func WithErrInterceptor(i ErrInterceptor) Option {
 	}
 }
 
-// services options
+func WithCustomComponentFactory(kind string, factorys ...*custom.Factory) Option {
+	return func(o *runtimeOptions) {
+		if len(factorys) == 0 {
+			return
+		}
+		o.services.custom[kind] = append(o.services.custom[kind], factorys...)
+	}
+}
 
 func WithHelloFactory(hellos ...*hello.HelloFactory) Option {
 	return func(o *runtimeOptions) {
@@ -109,7 +133,13 @@ func WithRpcFactory(rpcs ...*rpc.Factory) Option {
 	}
 }
 
-func WithFileFactory(files ...*file.FileFactory) Option {
+func WithOssFactory(oss ...*oss.Factory) Option {
+	return func(o *runtimeOptions) {
+		o.services.oss = append(o.services.oss, oss...)
+	}
+}
+
+func WithFileFactory(files ...*file.Factory) Option {
 	return func(o *runtimeOptions) {
 		o.services.files = append(o.services.files, files...)
 	}
@@ -153,7 +183,7 @@ func WithSequencerFactory(factorys ...*runtime_sequencer.Factory) Option {
 	}
 }
 
-func WithSecretStoresFactory(factorys ...*msecretstores.SecretStoresFactory) Option {
+func WithSecretStoresFactory(factorys ...*msecretstores.Factory) Option {
 	return func(o *runtimeOptions) {
 		o.services.secretStores = append(o.services.secretStores, factorys...)
 	}

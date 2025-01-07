@@ -19,30 +19,29 @@ package default_api
 import (
 	"context"
 	"errors"
-	"github.com/dapr/components-contrib/secretstores"
 	"sync"
 
-	"github.com/dapr/components-contrib/bindings"
-	grpc_api "mosn.io/layotto/pkg/grpc"
-	"mosn.io/layotto/pkg/grpc/dapr"
-	dapr_common_v1pb "mosn.io/layotto/pkg/grpc/dapr/proto/common/v1"
-	dapr_v1pb "mosn.io/layotto/pkg/grpc/dapr/proto/runtime/v1"
-	mgrpc "mosn.io/mosn/pkg/filter/network/grpc"
+	"github.com/dapr/components-contrib/secretstores"
 
+	"github.com/dapr/components-contrib/bindings"
 	"github.com/dapr/components-contrib/pubsub"
 	"github.com/dapr/components-contrib/state"
 	jsoniter "github.com/json-iterator/go"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
-	"mosn.io/layotto/components/file"
+	"mosn.io/pkg/log"
 
 	"mosn.io/layotto/components/configstores"
+	"mosn.io/layotto/components/file"
 	"mosn.io/layotto/components/hello"
 	"mosn.io/layotto/components/lock"
 	"mosn.io/layotto/components/rpc"
 	"mosn.io/layotto/components/sequencer"
+	grpc_api "mosn.io/layotto/pkg/grpc"
+	"mosn.io/layotto/pkg/grpc/dapr"
+	dapr_common_v1pb "mosn.io/layotto/pkg/grpc/dapr/proto/common/v1"
+	dapr_v1pb "mosn.io/layotto/pkg/grpc/dapr/proto/runtime/v1"
+	"mosn.io/layotto/spec/proto/runtime/v1"
 	runtimev1pb "mosn.io/layotto/spec/proto/runtime/v1"
-	"mosn.io/pkg/log"
 )
 
 const (
@@ -58,52 +57,13 @@ var (
 		},
 	}
 	// FIXME I put it here for compatibility.Don't write singleton like this !
-	// It should be refactored and deleted.
+	// LayottoAPISingleton should be refactored and deleted.
 	LayottoAPISingleton API
 )
 
 type API interface {
-	SayHello(ctx context.Context, in *runtimev1pb.SayHelloRequest) (*runtimev1pb.SayHelloResponse, error)
-	// InvokeService do rpc calls.
-	InvokeService(ctx context.Context, in *runtimev1pb.InvokeServiceRequest) (*runtimev1pb.InvokeResponse, error)
-	// GetConfiguration gets configuration from configuration store.
-	GetConfiguration(context.Context, *runtimev1pb.GetConfigurationRequest) (*runtimev1pb.GetConfigurationResponse, error)
-	// SaveConfiguration saves configuration into configuration store.
-	SaveConfiguration(context.Context, *runtimev1pb.SaveConfigurationRequest) (*emptypb.Empty, error)
-	// DeleteConfiguration deletes configuration from configuration store.
-	DeleteConfiguration(context.Context, *runtimev1pb.DeleteConfigurationRequest) (*emptypb.Empty, error)
-	// SubscribeConfiguration gets configuration from configuration store and subscribe the updates.
-	SubscribeConfiguration(runtimev1pb.Runtime_SubscribeConfigurationServer) error
-	// Publishes events to the specific topic.
-	PublishEvent(context.Context, *runtimev1pb.PublishEventRequest) (*emptypb.Empty, error)
-	// State
-	GetState(ctx context.Context, in *runtimev1pb.GetStateRequest) (*runtimev1pb.GetStateResponse, error)
-	GetBulkState(ctx context.Context, in *runtimev1pb.GetBulkStateRequest) (*runtimev1pb.GetBulkStateResponse, error)
-	SaveState(ctx context.Context, in *runtimev1pb.SaveStateRequest) (*emptypb.Empty, error)
-	DeleteState(ctx context.Context, in *runtimev1pb.DeleteStateRequest) (*emptypb.Empty, error)
-	DeleteBulkState(ctx context.Context, in *runtimev1pb.DeleteBulkStateRequest) (*emptypb.Empty, error)
-	ExecuteStateTransaction(ctx context.Context, in *runtimev1pb.ExecuteStateTransactionRequest) (*emptypb.Empty, error)
-	// Get File
-	GetFile(*runtimev1pb.GetFileRequest, runtimev1pb.Runtime_GetFileServer) error
-	// Put file with stream.
-	PutFile(runtimev1pb.Runtime_PutFileServer) error
-	// List all files
-	ListFile(ctx context.Context, in *runtimev1pb.ListFileRequest) (*runtimev1pb.ListFileResp, error)
-	//Delete specific file
-	DelFile(ctx context.Context, in *runtimev1pb.DelFileRequest) (*emptypb.Empty, error)
-	// Get file meta data, if file not exist,return code.NotFound error
-	GetFileMeta(ctx context.Context, in *runtimev1pb.GetFileMetaRequest) (*runtimev1pb.GetFileMetaResponse, error)
-	// Distributed Lock API
-	TryLock(context.Context, *runtimev1pb.TryLockRequest) (*runtimev1pb.TryLockResponse, error)
-	Unlock(context.Context, *runtimev1pb.UnlockRequest) (*runtimev1pb.UnlockResponse, error)
-	// Sequencer API
-	GetNextId(context.Context, *runtimev1pb.GetNextIdRequest) (*runtimev1pb.GetNextIdResponse, error)
-	// InvokeBinding Binding API
-	InvokeBinding(context.Context, *runtimev1pb.InvokeBindingRequest) (*runtimev1pb.InvokeBindingResponse, error)
-	// Gets secrets from secret stores.
-	GetSecret(context.Context, *runtimev1pb.GetSecretRequest) (*runtimev1pb.GetSecretResponse, error)
-	// Gets a bulk of secrets
-	GetBulkSecret(context.Context, *runtimev1pb.GetBulkSecretRequest) (*runtimev1pb.GetBulkSecretResponse, error)
+	//Layotto Service methods
+	runtime.RuntimeServer
 	// GrpcAPI related
 	grpc_api.GrpcAPI
 }
@@ -126,6 +86,7 @@ type api struct {
 	// app callback
 	AppCallbackConn   *grpc.ClientConn
 	topicPerComponent map[string]TopicSubscriptions
+	streamer          *streamer
 	// json
 	json jsoniter.API
 }
@@ -136,10 +97,10 @@ func (a *api) Init(conn *grpc.ClientConn) error {
 	return a.startSubscribing()
 }
 
-func (a *api) Register(s *grpc.Server, registeredServer mgrpc.RegisteredServer) (mgrpc.RegisteredServer, error) {
+func (a *api) Register(rawGrpcServer *grpc.Server) error {
 	LayottoAPISingleton = a
-	runtimev1pb.RegisterRuntimeServer(s, a)
-	return registeredServer, nil
+	runtimev1pb.RegisterRuntimeServer(rawGrpcServer, a)
+	return nil
 }
 
 func NewGrpcAPI(ac *grpc_api.ApplicationContext) grpc_api.GrpcAPI {
@@ -188,6 +149,7 @@ func NewAPI(
 		secretStores:             secretStores,
 		json:                     jsoniter.ConfigFastest,
 	}
+
 }
 
 func (a *api) SayHello(ctx context.Context, in *runtimev1pb.SayHelloRequest) (*runtimev1pb.SayHelloResponse, error) {
@@ -226,7 +188,7 @@ func (a *api) getHello(name string) (hello.HelloService, error) {
 
 func (a *api) InvokeService(ctx context.Context, in *runtimev1pb.InvokeServiceRequest) (*runtimev1pb.InvokeResponse, error) {
 	// convert request
-	var msg *dapr_common_v1pb.InvokeRequest = nil
+	var msg *dapr_common_v1pb.InvokeRequest
 	if in != nil && in.Message != nil {
 		msg = &dapr_common_v1pb.InvokeRequest{
 			Method:      in.Message.Method,

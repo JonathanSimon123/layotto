@@ -18,9 +18,10 @@ package default_api
 
 import (
 	"context"
+	"testing"
+
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
-	"testing"
 
 	"mosn.io/layotto/components/lock"
 	mock_lock "mosn.io/layotto/pkg/mock/components/lock"
@@ -127,7 +128,7 @@ func TestTryLock(t *testing.T) {
 
 	t.Run("normal", func(t *testing.T) {
 		mockLockStore := mock_lock.NewMockLockStore(gomock.NewController(t))
-		mockLockStore.EXPECT().TryLock(gomock.Any()).DoAndReturn(func(req *lock.TryLockRequest) (*lock.TryLockResponse, error) {
+		mockLockStore.EXPECT().TryLock(context.Background(), gomock.Any()).DoAndReturn(func(ctx context.Context, req *lock.TryLockRequest) (*lock.TryLockResponse, error) {
 			assert.Equal(t, "lock|||resource", req.ResourceId)
 			assert.Equal(t, "owner", req.LockOwner)
 			assert.Equal(t, int32(1), req.Expire)
@@ -194,7 +195,7 @@ func TestUnlock(t *testing.T) {
 
 	t.Run("normal", func(t *testing.T) {
 		mockLockStore := mock_lock.NewMockLockStore(gomock.NewController(t))
-		mockLockStore.EXPECT().Unlock(gomock.Any()).DoAndReturn(func(req *lock.UnlockRequest) (*lock.UnlockResponse, error) {
+		mockLockStore.EXPECT().Unlock(context.Background(), gomock.Any()).DoAndReturn(func(ctx context.Context, req *lock.UnlockRequest) (*lock.UnlockResponse, error) {
 			assert.Equal(t, "lock|||resource", req.ResourceId)
 			assert.Equal(t, "owner", req.LockOwner)
 			return &lock.UnlockResponse{

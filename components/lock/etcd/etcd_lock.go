@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,17 +10,38 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package etcd
 
 import (
 	"context"
 	"fmt"
-	"go.etcd.io/etcd/client/v3"
+	"sync"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"mosn.io/layotto/components/pkg/utils"
 
+	"mosn.io/layotto/kit/logger"
+
 	"mosn.io/layotto/components/lock"
-	"mosn.io/pkg/log"
+	"mosn.io/layotto/components/pkg/actuators"
 )
+
+const (
+	componentName = "lock-etcd"
+)
+
+var (
+	once               sync.Once
+	readinessIndicator *actuators.HealthIndicator
+	livenessIndicator  *actuators.HealthIndicator
+)
+
+func init() {
+	readinessIndicator = actuators.NewHealthIndicator()
+	livenessIndicator = actuators.NewHealthIndicator()
+}
 
 // Etcd lock store
 type EtcdLock struct {
@@ -29,20 +49,28 @@ type EtcdLock struct {
 	metadata utils.EtcdMetadata
 
 	features []lock.Feature
-	logger   log.ErrorLogger
 
 	ctx    context.Context
 	cancel context.CancelFunc
+	logger logger.Logger
 }
 
 // NewEtcdLock returns a new etcd lock
-func NewEtcdLock(logger log.ErrorLogger) *EtcdLock {
+func NewEtcdLock() *EtcdLock {
+	once.Do(func() {
+		indicators := &actuators.ComponentsIndicator{ReadinessIndicator: readinessIndicator, LivenessIndicator: livenessIndicator}
+		actuators.SetComponentsIndicator(componentName, indicators)
+	})
 	s := &EtcdLock{
 		features: make([]lock.Feature, 0),
-		logger:   logger,
+		logger:   logger.NewLayottoLogger("lock/etcd"),
 	}
-
+	logger.RegisterComponentLoggerListener("lock/etcd", s)
 	return s
+}
+
+func (e *EtcdLock) OnLogLevelChanged(outputLevel logger.LogLevel) {
+	e.logger.SetLogLevel(outputLevel)
 }
 
 // Init EtcdLock
@@ -50,17 +78,29 @@ func (e *EtcdLock) Init(metadata lock.Metadata) error {
 	// 1. parse config
 	m, err := utils.ParseEtcdMetadata(metadata.Properties)
 	if err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 		return err
 	}
 	e.metadata = m
 	// 2. construct client
 	if e.client, err = utils.NewEtcdClient(m); err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 		return err
 	}
 
 	e.ctx, e.cancel = context.WithCancel(context.Background())
+	readinessIndicator.SetStarted()
+	livenessIndicator.SetStarted()
 
 	return err
+}
+
+// LockKeepAlive try to renewal lease
+func (e *EtcdLock) LockKeepAlive(ctx context.Context, request *lock.LockKeepAliveRequest) (*lock.LockKeepAliveResponse, error) {
+	//TODO: implemnt function
+	return nil, nil
 }
 
 // Features is to get EtcdLock's features
@@ -69,15 +109,15 @@ func (e *EtcdLock) Features() []lock.Feature {
 }
 
 // Node tries to acquire a etcd lock
-func (e *EtcdLock) TryLock(req *lock.TryLockRequest) (*lock.TryLockResponse, error) {
+func (e *EtcdLock) TryLock(ctx context.Context, req *lock.TryLockRequest) (*lock.TryLockResponse, error) {
 	var leaseId clientv3.LeaseID
 	//1.Create new lease
 	lease := clientv3.NewLease(e.client)
-	if leaseGrantResp, err := lease.Grant(e.ctx, int64(req.Expire)); err != nil {
+	leaseGrantResp, err := lease.Grant(e.ctx, int64(req.Expire))
+	if err != nil {
 		return &lock.TryLockResponse{}, fmt.Errorf("[etcdLock]: Create new lease returned error: %s.ResourceId: %s", err, req.ResourceId)
-	} else {
-		leaseId = leaseGrantResp.ID
 	}
+	leaseId = leaseGrantResp.ID
 
 	key := e.getKey(req.ResourceId)
 
@@ -100,7 +140,7 @@ func (e *EtcdLock) TryLock(req *lock.TryLockRequest) (*lock.TryLockResponse, err
 }
 
 // Node tries to release a etcd lock
-func (e *EtcdLock) Unlock(req *lock.UnlockRequest) (*lock.UnlockResponse, error) {
+func (e *EtcdLock) Unlock(ctx context.Context, req *lock.UnlockRequest) (*lock.UnlockResponse, error) {
 	key := e.getKey(req.ResourceId)
 
 	// 1.Create new KV
@@ -118,14 +158,13 @@ func (e *EtcdLock) Unlock(req *lock.UnlockRequest) (*lock.UnlockResponse, error)
 
 	if txnResponse.Succeeded {
 		return &lock.UnlockResponse{Status: lock.SUCCESS}, nil
-	} else {
-		resp := txnResponse.Responses[0].GetResponseRange()
-		if len(resp.Kvs) == 0 {
-			return &lock.UnlockResponse{Status: lock.LOCK_UNEXIST}, nil
-		}
-
-		return &lock.UnlockResponse{Status: lock.LOCK_BELONG_TO_OTHERS}, nil
 	}
+	resp := txnResponse.Responses[0].GetResponseRange()
+	if len(resp.Kvs) == 0 {
+		return &lock.UnlockResponse{Status: lock.LOCK_UNEXIST}, nil
+	}
+
+	return &lock.UnlockResponse{Status: lock.LOCK_BELONG_TO_OTHERS}, nil
 }
 
 // Close shuts down the client's etcd connections.

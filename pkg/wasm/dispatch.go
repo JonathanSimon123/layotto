@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,8 +32,10 @@ type Router struct {
 // unsafe for concurrent
 func (route *Router) RegisterRoute(id string, plugin *WasmPlugin) {
 	if group, found := route.routes[id]; found {
-		group.count += 1
-		group.plugins = append(group.plugins, plugin)
+		group.plugins = append(filter(group.plugins, func(item *WasmPlugin) bool {
+			return item.pluginName != plugin.pluginName
+		}).([]*WasmPlugin), plugin)
+		group.count = len(group.plugins)
 	} else {
 		route.routes[id] = &Group{
 			count:   1,
@@ -43,11 +44,16 @@ func (route *Router) RegisterRoute(id string, plugin *WasmPlugin) {
 	}
 }
 
-// Get random plugin with rand id
+// RemoveRoute remove group by id
+func (route *Router) RemoveRoute(id string) {
+	delete(route.routes, id)
+}
+
+// GetRandomPluginByID Get random plugin with rand id
 func (route *Router) GetRandomPluginByID(id string) (*WasmPlugin, error) {
 	group, ok := route.routes[id]
 	if !ok {
-		log.DefaultLogger.Errorf("[proxywasm][filter] GetRandomPluginByID id not registered, id: %s", id)
+		log.DefaultLogger.Infof("[proxywasm][dispatch] GetRandomPluginByID id not registered, id: %s", id)
 		return nil, errors.New("id is not registered")
 	}
 
@@ -55,5 +61,4 @@ func (route *Router) GetRandomPluginByID(id string) (*WasmPlugin, error) {
 	plugin := group.plugins[idx]
 	log.DefaultLogger.Infof("[proxywasm][dispatch] GetRandomPluginByID return index: %d, plugin: %s", idx, plugin.pluginName)
 	return plugin, nil
-
 }

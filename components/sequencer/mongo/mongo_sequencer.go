@@ -1,4 +1,3 @@
-//
 // Copyright 2021 Layotto Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,15 +15,35 @@ package mongo
 import (
 	"context"
 	"fmt"
+	"sync"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
+
+	"mosn.io/layotto/kit/logger"
+
+	"mosn.io/layotto/components/pkg/actuators"
 	"mosn.io/layotto/components/pkg/utils"
 	"mosn.io/layotto/components/sequencer"
-	"mosn.io/pkg/log"
 )
+
+const (
+	componentName = "sequencer-mongo"
+)
+
+var (
+	once               sync.Once
+	readinessIndicator *actuators.HealthIndicator
+	livenessIndicator  *actuators.HealthIndicator
+)
+
+func init() {
+	readinessIndicator = actuators.NewHealthIndicator()
+	livenessIndicator = actuators.NewHealthIndicator()
+}
 
 type MongoSequencer struct {
 	factory utils.MongoFactory
@@ -36,7 +55,7 @@ type MongoSequencer struct {
 	metadata   utils.MongoMetadata
 	biggerThan map[string]int64
 
-	logger log.ErrorLogger
+	logger logger.Logger
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -48,12 +67,21 @@ type SequencerDocument struct {
 }
 
 // MongoSequencer returns a new mongo sequencer
-func NewMongoSequencer(logger log.ErrorLogger) *MongoSequencer {
+func NewMongoSequencer() *MongoSequencer {
+	once.Do(func() {
+		indicators := &actuators.ComponentsIndicator{ReadinessIndicator: readinessIndicator, LivenessIndicator: livenessIndicator}
+		actuators.SetComponentsIndicator(componentName, indicators)
+	})
 	m := &MongoSequencer{
-		logger: logger,
+		logger: logger.NewLayottoLogger("sequencer/mongo"),
 	}
 
+	logger.RegisterComponentLoggerListener("sequencer/mongo", m)
 	return m
+}
+
+func (e *MongoSequencer) OnLogLevelChanged(level logger.LogLevel) {
+	e.logger.SetLogLevel(level)
 }
 
 func (e *MongoSequencer) Init(config sequencer.Configuration) error {
@@ -61,6 +89,8 @@ func (e *MongoSequencer) Init(config sequencer.Configuration) error {
 	// 1.parse config
 	m, err := utils.ParseMongoMetadata(config.Properties)
 	if err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 		return err
 	}
 	e.metadata = m
@@ -72,16 +102,22 @@ func (e *MongoSequencer) Init(config sequencer.Configuration) error {
 	e.ctx, e.cancel = context.WithCancel(context.Background())
 
 	if e.client, err = e.factory.NewMongoClient(m); err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 		return err
 	}
 
 	if err := e.client.Ping(e.ctx, nil); err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 		return err
 	}
 
 	// Connections Collection
 	e.collection, err = utils.SetCollection(e.client, e.factory, e.metadata)
 	if err != nil {
+		readinessIndicator.ReportError(err.Error())
+		livenessIndicator.ReportError(err.Error())
 		return err
 	}
 
@@ -93,6 +129,8 @@ func (e *MongoSequencer) Init(config sequencer.Configuration) error {
 			// find key of biggerThan
 			cursor, err := e.collection.Find(e.ctx, bson.M{"_id": k})
 			if err != nil {
+				readinessIndicator.ReportError(err.Error())
+				livenessIndicator.ReportError(err.Error())
 				return err
 			}
 			if cursor != nil && cursor.RemainingBatchLength() > 0 {
@@ -104,7 +142,8 @@ func (e *MongoSequencer) Init(config sequencer.Configuration) error {
 			}
 		}
 	}
-
+	readinessIndicator.SetStarted()
+	livenessIndicator.SetStarted()
 	return err
 }
 

@@ -21,12 +21,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+
+	// bridge to mosn
+	_ "mosn.io/mosn/pkg/filter/network/proxy"
+	"mosn.io/pkg/log"
 
 	"mosn.io/layotto/components/rpc"
 	"mosn.io/layotto/components/rpc/callback"
 	"mosn.io/layotto/components/rpc/invoker/mosn/channel"
-	_ "mosn.io/mosn/pkg/filter/network/proxy"
-	"mosn.io/pkg/log"
 )
 
 const (
@@ -91,7 +94,13 @@ func (m *mosnInvoker) Invoke(ctx context.Context, req *rpc.RPCRequest) (resp *rp
 
 	// 1. validate request
 	if req.Timeout == 0 {
-		req.Timeout = 3000
+		req.Timeout = rpc.DefaultRequestTimeoutMs
+		if ts, ok := req.Header[rpc.RequestTimeoutMs]; ok && len(ts) > 0 {
+			t, err := strconv.ParseInt(ts[0], 10, 32)
+			if err == nil && t != 0 {
+				req.Timeout = int32(t)
+			}
+		}
 	}
 	req.Ctx = ctx
 	log.DefaultLogger.Debugf("[runtime][rpc]request %+v", req)
@@ -112,6 +121,7 @@ func (m *mosnInvoker) Invoke(ctx context.Context, req *rpc.RPCRequest) (resp *rp
 	resp, err = m.cb.AfterInvoke(resp)
 	if err != nil {
 		log.DefaultLogger.Errorf("[runtime][rpc]after filter error %s", err.Error())
+		return nil, err
 	}
-	return resp, err
+	return resp, nil
 }

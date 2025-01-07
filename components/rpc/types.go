@@ -22,6 +22,15 @@ import (
 	"strings"
 )
 
+const (
+	TargetAddress    = "rpc_target_address"
+	RequestTimeoutMs = "rpc_request_timeout"
+)
+
+const (
+	DefaultRequestTimeoutMs = 3000
+)
+
 // RPCHeader is storage header info
 type RPCHeader map[string][]string
 
@@ -69,6 +78,8 @@ type RPCResponse struct {
 	Header      RPCHeader
 	ContentType string
 	Data        []byte
+	Success     bool
+	Error       error
 }
 
 type RpcConfig struct {
